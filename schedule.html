@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>排程工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
     <style>
@@ -77,6 +78,16 @@
             border-radius: 8px;
             font-size: 15px;
             cursor: pointer;
+        }
+
+        .import-btn, .tpl-btn {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #555;
         }
 
         .filter-group {
@@ -270,6 +281,9 @@
 
         <div class="toolbar">
             <button class="add-btn" onclick="openModal()">＋ 新增工單</button>
+            <button class="import-btn" onclick="document.getElementById('excelInput').click()">📥 匯入 Excel</button>
+            <button class="tpl-btn" onclick="downloadTpl()">⬇️ 範本</button>
+            <input type="file" id="excelInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importExcel(this.files[0]); this.value='';">
             <div class="filter-group">
                 <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
                 <button class="filter-btn" data-filter="open" onclick="setFilter('open')">進行中</button>
@@ -286,6 +300,10 @@
             <div class="form-row">
                 <label>工單號 *</label>
                 <input type="text" id="fOrderNo" placeholder="例如 WO-2026-001">
+            </div>
+            <div class="form-row">
+                <label>成品料號（缺料分析展 BOM 用）</label>
+                <input type="text" id="fMat" placeholder="例如 FG-1000">
             </div>
             <div class="form-row">
                 <label>產品名稱</label>
@@ -326,42 +344,14 @@
         </div>
     </div>
 
+    <script src="common.js"></script>
     <script>
-        // Firebase 配置（與生管看板共用同一個資料庫，但存在不同路徑下，互不影響）
-        const firebaseConfig = {
-            databaseURL: "https://super-ting-default-rtdb.firebaseio.com"
-        };
+        // 與生管看板共用同一個資料庫，但存在 toolbox/ 路徑下，互不影響
         const DATA_PATH = 'toolbox/schedule/orders';
 
-        let db = null;
-        try {
-            firebase.initializeApp(firebaseConfig);
-            db = firebase.database();
-        } catch(e) {
-            console.log("Firebase 初始化失敗，使用本地模式", e);
-        }
-
-        let orders = {};          // { id: {orderNo, product, qty, owner, start, due, status, note} }
+        let orders = {};          // { id: {orderNo, mat, product, qty, owner, start, due, status, note} }
         let currentFilter = 'all';
         let editingId = null;
-
-        // 右上角同步狀態指示燈
-        function setSyncStatus(connected) {
-            let badge = document.getElementById('syncStatus');
-            if (!badge) {
-                badge = document.createElement('div');
-                badge.id = 'syncStatus';
-                badge.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9999;padding:4px 10px;border-radius:12px;font-size:12px;color:white;box-shadow:0 2px 6px rgba(0,0,0,0.2);';
-                document.body.appendChild(badge);
-            }
-            if (connected) {
-                badge.textContent = '🟢 雲端同步中';
-                badge.style.background = '#28a745';
-            } else {
-                badge.textContent = '🔴 離線（僅本機）';
-                badge.style.background = '#dc3545';
-            }
-        }
 
         function initData() {
             // 先載入本機快取，離線時也看得到資料
@@ -374,9 +364,6 @@
                     localStorage.setItem('scheduleOrders', JSON.stringify(orders));
                     render();
                 });
-                db.ref('.info/connected').on('value', snap => setSyncStatus(snap.val() === true));
-            } else {
-                setSyncStatus(false);
             }
         }
 
@@ -411,10 +398,6 @@
 
         const statusNames = { todo: '未開始', doing: '進行中', done: '已完成' };
 
-        function esc(s) {
-            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        }
-
         function render() {
             const list = document.getElementById('orderList');
             let items = Object.entries(orders).map(([id, o]) => ({ id, ...o }));
@@ -436,7 +419,7 @@
                 <div class="order-card ${st}">
                     <div class="order-main">
                         <div class="order-no">${esc(o.orderNo)}</div>
-                        <div class="order-product">${esc(o.product || '')}${o.qty ? '・' + esc(o.qty) + ' pcs' : ''}</div>
+                        <div class="order-product">${o.mat ? esc(o.mat) + '｜' : ''}${esc(o.product || '')}${o.qty ? '・' + esc(o.qty) + ' pcs' : ''}</div>
                     </div>
                     <div class="order-meta">
                         <span>👤 ${esc(o.owner || '未指定')}</span>
@@ -467,6 +450,7 @@
             document.getElementById('modalTitle').textContent = id ? '編輯工單' : '新增工單';
             const o = id ? orders[id] : {};
             document.getElementById('fOrderNo').value = o.orderNo || '';
+            document.getElementById('fMat').value = o.mat || '';
             document.getElementById('fProduct').value = o.product || '';
             document.getElementById('fQty').value = o.qty || '';
             document.getElementById('fOwner').value = o.owner || '';
@@ -491,6 +475,7 @@
             const id = editingId || 'o' + Date.now();
             orders[id] = {
                 orderNo,
+                mat: document.getElementById('fMat').value.trim(),
                 product: document.getElementById('fProduct').value.trim(),
                 qty: document.getElementById('fQty').value,
                 owner: document.getElementById('fOwner').value.trim(),
@@ -514,6 +499,52 @@
                 delete orders[id];
                 persist();
             }
+        }
+
+        // Excel 一鍵匯入：以工單號比對，已存在就更新、沒有就新增
+        function importExcel(file) {
+            if (!file) return;
+            readExcelFile(file, (err, rows) => {
+                if (err) { alert('讀取 Excel 失敗：' + err.message); return; }
+                if (!rows.length) { alert('檔案裡沒有資料'); return; }
+                const map = buildHeaderMap(rows[0]);
+                let added = 0, updated = 0, skipped = 0;
+                const byNo = {};
+                Object.entries(orders).forEach(([id, o]) => { if (o.orderNo) byNo[o.orderNo] = id; });
+                rows.forEach((r, i) => {
+                    const orderNo = String(cell(r, map, 'orderNo')).trim();
+                    const due = parseDateCell(cell(r, map, 'dueDate'));
+                    if (!orderNo || !due) { skipped++; return; }
+                    const exists = byNo[orderNo];
+                    const id = exists || ('o' + Date.now() + '_' + i);
+                    const prev = orders[id] || {};
+                    if (exists) updated++; else { added++; byNo[orderNo] = id; }
+                    const mat = String(cell(r, map, 'mat') || cell(r, map, 'parent') || '').trim();
+                    orders[id] = {
+                        orderNo,
+                        mat: mat || prev.mat || '',
+                        product: String(cell(r, map, 'name')).trim() || prev.product || '',
+                        qty: num(cell(r, map, 'qty')) || prev.qty || '',
+                        owner: String(cell(r, map, 'owner')).trim() || prev.owner || '',
+                        start: parseDateCell(cell(r, map, 'startDate')) || prev.start || '',
+                        due,
+                        status: prev.status || 'todo',
+                        note: String(cell(r, map, 'note')).trim() || prev.note || ''
+                    };
+                });
+                if (added + updated === 0) {
+                    alert('沒有匯入任何資料。\n請確認標題列包含「工單號」與「交期」\n（可按「⬇️ 範本」下載格式參考）');
+                    return;
+                }
+                persist();
+                alert(`匯入完成：新增 ${added} 筆、更新 ${updated} 筆` + (skipped ? `、略過 ${skipped} 筆（缺工單號或交期）` : ''));
+            });
+        }
+
+        function downloadTpl() {
+            downloadTemplate('排程匯入範本.xlsx',
+                ['工單號', '成品料號', '品名', '數量', '負責人', '開始日期', '交期', '備註'],
+                ['WO-2026-001', 'FG-1000', '範例產品', 100, 'Stella', '2026-07-10', '2026-07-20', '']);
         }
 
         initData();

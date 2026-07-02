@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>年度行事曆維護</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+
+        .back-link {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            background: rgba(255,255,255,0.2);
+            padding: 6px 12px;
+            border-radius: 16px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .year-nav {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .year-nav button {
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .year-nav .year {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+            min-width: 90px;
+            text-align: center;
+        }
+
+        .legend {
+            display: flex;
+            gap: 14px;
+            font-size: 13px;
+            color: #555;
+            align-items: center;
+        }
+
+        .dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            margin-right: 4px;
+            vertical-align: -1px;
+        }
+
+        .dot.work { background: #e8f0fe; border: 1px solid #a9c3f5; }
+        .dot.off { background: #ffd6d6; border: 1px solid #f0a0a0; }
+
+        .stats {
+            text-align: center;
+            font-size: 14px;
+            color: #555;
+            padding: 10px;
+        }
+
+        .months {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 16px;
+            padding: 10px 20px 30px;
+        }
+
+        .month {
+            border: 1px solid #eee;
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        .month h3 {
+            text-align: center;
+            font-size: 15px;
+            color: #444;
+            margin-bottom: 6px;
+        }
+
+        .month table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .month th {
+            font-size: 11px;
+            color: #999;
+            font-weight: normal;
+            padding: 2px 0;
+        }
+
+        .month td {
+            text-align: center;
+            font-size: 13px;
+            padding: 0;
+        }
+
+        .day {
+            display: block;
+            width: 100%;
+            padding: 5px 0;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            background: #e8f0fe;
+            color: #333;
+            margin: 1px 0;
+        }
+
+        .day.off {
+            background: #ffd6d6;
+            color: #a33;
+        }
+
+        .day.today {
+            border-color: #667eea;
+            font-weight: bold;
+        }
+
+        .day:hover { filter: brightness(0.92); }
+
+        .hint {
+            text-align: center;
+            font-size: 13px;
+            color: #999;
+            padding: 0 20px 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📆 年度行事曆維護</h1>
+            <p>點一下日期即可切換「上班／休息」・休息日不列入交期與排程計算</p>
+        </div>
+
+        <div class="toolbar">
+            <div class="year-nav">
+                <button onclick="changeYear(-1)">◀ 前一年</button>
+                <div class="year" id="yearLabel"></div>
+                <button onclick="changeYear(1)">後一年 ▶</button>
+            </div>
+            <div class="legend">
+                <span><span class="dot work"></span>上班日</span>
+                <span><span class="dot off"></span>休息日</span>
+                <span>（預設週六日休息）</span>
+            </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+        <div class="months" id="months"></div>
+        <div class="hint">修改會立即同步到所有裝置。休息日會被「基本交期天數」的推算自動跳過。</div>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        const OV_PATH = 'toolbox/calendar/overrides';
+        let overrides = {};
+        let year = new Date().getFullYear();
+
+        function initData() {
+            overrides = JSON.parse(localStorage.getItem('calOverrides') || '{}');
+            render();
+            if (db) {
+                db.ref(OV_PATH).on('value', snap => {
+                    overrides = snap.val() || {};
+                    localStorage.setItem('calOverrides', JSON.stringify(overrides));
+                    render();
+                });
+            }
+        }
+
+        function changeYear(delta) {
+            year += delta;
+            render();
+        }
+
+        function toggleDay(dateStr) {
+            const nowWork = isWorkday(dateStr, overrides);
+            const day = new Date(dateStr + 'T00:00:00').getDay();
+            const defaultWork = day >= 1 && day <= 5;
+            const target = nowWork ? 'off' : 'on';
+            // 若切回預設狀態就直接移除覆蓋設定，保持資料乾淨
+            const backToDefault = (target === 'on' && defaultWork) || (target === 'off' && !defaultWork);
+            if (backToDefault) {
+                delete overrides[dateStr];
+                if (db) db.ref(OV_PATH + '/' + dateStr).remove();
+            } else {
+                overrides[dateStr] = target;
+                if (db) db.ref(OV_PATH + '/' + dateStr).set(target);
+            }
+            localStorage.setItem('calOverrides', JSON.stringify(overrides));
+            render();
+        }
+
+        function render() {
+            document.getElementById('yearLabel').textContent = year + ' 年';
+            const today = todayStr();
+            const container = document.getElementById('months');
+            let workdays = 0;
+            let html = '';
+            for (let m = 0; m < 12; m++) {
+                const first = new Date(year, m, 1);
+                const daysInMonth = new Date(year, m + 1, 0).getDate();
+                let cells = '';
+                let dow = first.getDay();
+                let rows = '<tr>' + '<td></td>'.repeat(dow);
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const ds = year + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+                    const work = isWorkday(ds, overrides);
+                    if (work) workdays++;
+                    rows += `<td><span class="day ${work ? '' : 'off'} ${ds === today ? 'today' : ''}" onclick="toggleDay('${ds}')">${d}</span></td>`;
+                    dow = (dow + 1) % 7;
+                    if (dow === 0 && d < daysInMonth) rows += '</tr><tr>';
+                }
+                if (dow !== 0) rows += '<td></td>'.repeat(7 - dow);
+                rows += '</tr>';
+                html += `
+                <div class="month">
+                    <h3>${m+1} 月</h3>
+                    <table>
+                        <tr><th>日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th></tr>
+                        ${rows}
+                    </table>
+                </div>`;
+            }
+            container.innerHTML = html;
+            document.getElementById('stats').textContent = `${year} 年共 ${workdays} 個上班日`;
+        }
+
+        initData();
+    </script>
+</body>
+</html>

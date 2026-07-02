@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>缺料分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 1250px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+
+        .back-link {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            background: rgba(255,255,255,0.2);
+            padding: 6px 12px;
+            border-radius: 16px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .run-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .export-btn {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #555;
+        }
+
+        .filter-group { display: flex; gap: 6px; margin-left: auto; }
+
+        .filter-btn {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #555;
+        }
+
+        .filter-btn.active { background: #667eea; border-color: #667eea; color: white; }
+
+        .summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 14px 20px 0;
+        }
+
+        .chip {
+            padding: 7px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            color: white;
+        }
+
+        .chip.red { background: #dc3545; }
+        .chip.orange { background: #fd7e14; }
+        .chip.ok { background: #28a745; }
+        .chip.info { background: #6c757d; }
+
+        .panel { padding: 14px 20px 30px; }
+
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid #eee;
+            border-radius: 8px;
+        }
+
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            min-width: 900px;
+        }
+
+        table.data th {
+            background: #f5f6fa;
+            padding: 8px;
+            text-align: left;
+            color: #555;
+            white-space: nowrap;
+        }
+
+        table.data td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+
+        tr.red td { background: #fff5f5; }
+        tr.orange td { background: #fff8f0; }
+
+        .lv-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            color: white;
+            white-space: nowrap;
+        }
+
+        .lv-badge.red { background: #dc3545; }
+        .lv-badge.orange { background: #fd7e14; }
+        .lv-badge.ok { background: #28a745; }
+        .lv-badge.info { background: #6c757d; }
+
+        .empty-hint {
+            text-align: center;
+            color: #999;
+            padding: 40px 10px;
+            font-size: 15px;
+        }
+
+        .datastat {
+            font-size: 12px;
+            color: #999;
+            padding: 8px 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>🚨 缺料分析</h1>
+            <p>依排程展開 BOM → 扣庫存 → 對在途交期，找出無法滿足的工單與原因</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="run-btn" onclick="loadAndAnalyze()">🔄 重新分析</button>
+            <button class="export-btn" onclick="exportResult()">⬇️ 匯出結果 Excel</button>
+            <div class="filter-group">
+                <button class="filter-btn active" data-f="problem" onclick="setFilter('problem')">只看有問題</button>
+                <button class="filter-btn" data-f="all" onclick="setFilter('all')">全部明細</button>
+            </div>
+        </div>
+
+        <div class="datastat" id="dataStat"></div>
+        <div class="summary" id="summary"></div>
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="resultTable"></table>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        let results = [];
+        let filter = 'problem';
+        const LV_NAME = { red: '🔴 無法滿足', orange: '🟠 需注意', ok: '🟢 可滿足', info: 'ℹ️ 資料不足' };
+
+        async function fetchPath(path, fallback) {
+            if (!db) return fallback;
+            try {
+                const snap = await db.ref(path).get();
+                return snap.val() ?? fallback;
+            } catch (e) { return fallback; }
+        }
+
+        async function loadAndAnalyze() {
+            document.getElementById('resultTable').innerHTML =
+                '<tr><td><div class="empty-hint">分析中…</div></td></tr>';
+            const [orders, overrides, leadtime, incoming, bom, inventory] = await Promise.all([
+                fetchPath('toolbox/schedule/orders', {}),
+                fetchPath('toolbox/calendar/overrides', {}),
+                fetchPath('toolbox/materials/leadtime', { rows: [] }),
+                fetchPath('toolbox/materials/incoming', { rows: [] }),
+                fetchPath('toolbox/materials/bom', { rows: [] }),
+                fetchPath('toolbox/materials/inventory', { rows: [] })
+            ]);
+            const norm = v => Array.isArray(v) ? v : Object.values(v || {});
+            const data = {
+                orders,
+                overrides,
+                leadtime: norm(leadtime.rows),
+                incoming: norm(incoming.rows),
+                bom: norm(bom.rows),
+                inventory: norm(inventory.rows)
+            };
+            document.getElementById('dataStat').textContent =
+                `資料狀態：排程 ${Object.keys(orders || {}).length} 張工單・BOM ${data.bom.length} 筆・庫存 ${data.inventory.length} 筆・在途 ${data.incoming.length} 筆・基本交期 ${data.leadtime.length} 筆` +
+                (leadtime.updatedAt ? `（交期更新於 ${leadtime.updatedAt}）` : '');
+            results = analyze(data);
+            render();
+        }
+
+        function analyze(data) {
+            const today = todayStr();
+            const ov = data.overrides || {};
+
+            // 建立查詢表
+            const ltMap = {}, nameMap = {}, invMap = {}, bomMap = {}, poMap = {};
+            data.leadtime.forEach(r => { ltMap[r.mat] = num(r.days); if (r.name) nameMap[r.mat] = r.name; });
+            data.inventory.forEach(r => {
+                invMap[r.mat] = (invMap[r.mat] || 0) + num(r.qty);
+                if (r.name && !nameMap[r.mat]) nameMap[r.mat] = r.name;
+            });
+            data.bom.forEach(r => (bomMap[r.parent] = bomMap[r.parent] || []).push(r));
+            data.incoming.forEach(r => (poMap[r.mat] = poMap[r.mat] || []).push({ ...r, remain: num(r.qty) }));
+            Object.values(poMap).forEach(list => list.sort((a, b) => (a.date || '9999') < (b.date || '9999') ? -1 : 1));
+
+            // 未完成工單依需求日（開始日，沒有就用交期）排序，先到先分配
+            const list = Object.entries(data.orders || {}).map(([id, o]) => ({ id, ...o }))
+                .filter(o => o.status !== 'done')
+                .sort((a, b) => ((a.start || a.due || '9999') < (b.start || b.due || '9999') ? -1 : 1));
+
+            const out = [];
+            list.forEach(o => {
+                const needDate = o.start || o.due || '';
+                const base = { orderNo: o.orderNo, parent: o.mat || '', needDate, product: o.product || '' };
+                if (!o.mat) {
+                    out.push({ ...base, child: '—', level: 'info', msg: '工單未填成品料號，無法展開 BOM（請到排程工具補上）' });
+                    return;
+                }
+                const comps = bomMap[o.mat];
+                if (!comps || !comps.length) {
+                    out.push({ ...base, child: '—', level: 'info', msg: `查無 ${o.mat} 的 BOM 資料` });
+                    return;
+                }
+                comps.forEach(c => {
+                    const need = num(o.qty) * num(c.usage);
+                    let short = need, fromInv = 0;
+                    if ((invMap[c.child] || 0) > 0) {
+                        fromInv = Math.min(invMap[c.child], short);
+                        invMap[c.child] -= fromInv;
+                        short -= fromInv;
+                    }
+                    // 依交期由早到晚分配在途量
+                    const allocs = [];
+                    for (const po of (poMap[c.child] || [])) {
+                        if (short <= 0) break;
+                        if (po.remain <= 0) continue;
+                        const take = Math.min(po.remain, short);
+                        po.remain -= take; short -= take;
+                        allocs.push({ date: po.date, qty: take, po: po.po });
+                    }
+                    const fromPo = need - fromInv - short;
+                    const pastDue = allocs.filter(a => a.date && a.date < today);
+                    const late = allocs.filter(a => a.date && needDate && a.date > needDate);
+                    const lt = ltMap[c.child];
+
+                    let level = 'ok', msg = '庫存／在途可準時滿足';
+                    if (short > 0) {
+                        const hadAny = fromInv > 0 || (poMap[c.child] || []).length > 0;
+                        if (!hadAny) {
+                            // 完全沒庫存也沒在途 → 尚未展開採購
+                            if (lt > 0) {
+                                const eta = addWorkdays(today, lt, ov);
+                                if (needDate && eta > needDate) {
+                                    level = 'red';
+                                    msg = `無庫存、無在途，尚未採購；即使今天下單（基本交期 ${lt} 工作天）預計 ${eta} 才到，趕不上需求日 ${needDate}`;
+                                } else {
+                                    level = 'orange';
+                                    msg = `無庫存、無在途，尚未採購；請立即下單（基本交期 ${lt} 工作天，預計 ${eta} 可到）`;
+                                }
+                            } else {
+                                level = 'red';
+                                msg = '無庫存、無在途、也查無基本交期，尚未展開採購，請立即處理';
+                            }
+                        } else {
+                            level = 'red';
+                            msg = `庫存與在途合計仍不足，缺 ${short}`;
+                            if (lt > 0) {
+                                const eta = addWorkdays(today, lt, ov);
+                                msg += `；若今日補單（基本交期 ${lt} 工作天）預計 ${eta} 到` + (needDate && eta > needDate ? `，仍趕不上需求日` : '');
+                            }
+                            if (pastDue.length) {
+                                msg += '；另有在途交期已過仍未入庫（' + pastDue.map(p => (p.po ? p.po + ' ' : '') + p.date).join('、') + '），請追蹤廠商';
+                            }
+                        }
+                    } else if (pastDue.length) {
+                        level = 'red';
+                        msg = '在途交期已過仍未入庫（' + pastDue.map(p => (p.po ? p.po + ' ' : '') + p.date).join('、') + '），請立即追蹤廠商';
+                    } else if (late.length) {
+                        level = 'orange';
+                        msg = `在途最早 ${late[0].date} 到貨，晚於需求日 ${needDate}`;
+                    }
+                    out.push({ ...base, child: c.child, childName: nameMap[c.child] || '', need, fromInv, fromPo, short, level, msg });
+                });
+            });
+            return out;
+        }
+
+        function setFilter(f) {
+            filter = f;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+            render();
+        }
+
+        function render() {
+            const counts = { red: 0, orange: 0, ok: 0, info: 0 };
+            results.forEach(r => counts[r.level]++);
+            document.getElementById('summary').innerHTML = `
+                <span class="chip red">🔴 無法滿足 ${counts.red}</span>
+                <span class="chip orange">🟠 需注意 ${counts.orange}</span>
+                <span class="chip ok">🟢 可滿足 ${counts.ok}</span>
+                <span class="chip info">ℹ️ 資料不足 ${counts.info}</span>`;
+
+            let rows = results;
+            if (filter === 'problem') rows = results.filter(r => r.level !== 'ok');
+
+            const table = document.getElementById('resultTable');
+            if (!rows.length) {
+                table.innerHTML = `<tr><td><div class="empty-hint">${results.length ? '目前沒有問題項目 🎉（切「全部明細」可看完整結果）' : '沒有分析結果。請先到「排程工具」建立工單、「物料資料管理」匯入 BOM／庫存等資料。'}</div></td></tr>`;
+                return;
+            }
+            table.innerHTML =
+                `<tr><th>狀態</th><th>工單號</th><th>需求日</th><th>成品料號</th><th>子件料號</th><th>品名</th>
+                 <th>需求量</th><th>庫存扣抵</th><th>在途扣抵</th><th>缺口</th><th>原因說明</th></tr>` +
+                rows.map(r => `
+                <tr class="${r.level}">
+                    <td><span class="lv-badge ${r.level}">${LV_NAME[r.level]}</span></td>
+                    <td>${esc(r.orderNo)}</td>
+                    <td>${esc(r.needDate || '—')}</td>
+                    <td>${esc(r.parent)}</td>
+                    <td>${esc(r.child)}</td>
+                    <td>${esc(r.childName || '')}</td>
+                    <td>${r.need ?? ''}</td>
+                    <td>${r.fromInv ?? ''}</td>
+                    <td>${r.fromPo ?? ''}</td>
+                    <td>${r.short ? '<b style="color:#dc3545">' + r.short + '</b>' : (r.short === 0 ? 0 : '')}</td>
+                    <td>${esc(r.msg)}</td>
+                </tr>`).join('');
+        }
+
+        function exportResult() {
+            if (!results.length) { alert('沒有可匯出的結果，請先執行分析'); return; }
+            const aoa = [['狀態','工單號','需求日','成品料號','子件料號','品名','需求量','庫存扣抵','在途扣抵','缺口','原因說明']];
+            results.forEach(r => aoa.push([
+                LV_NAME[r.level].replace(/^\S+\s/, ''), r.orderNo, r.needDate, r.parent, r.child,
+                r.childName || '', r.need ?? '', r.fromInv ?? '', r.fromPo ?? '', r.short ?? '', r.msg
+            ]));
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '缺料分析');
+            XLSX.writeFile(wb, `缺料分析_${todayStr()}.xlsx`);
+        }
+
+        loadAndAnalyze();
+    </script>
+</body>
+</html>
