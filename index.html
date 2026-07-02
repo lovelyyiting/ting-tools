@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ting 的工作工具箱</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            color: white;
+            text-align: center;
+            padding: 40px 20px 30px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 15px;
+            opacity: 0.9;
+        }
+
+        .tools {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 20px;
+            padding: 10px;
+        }
+
+        .tool-card {
+            background: white;
+            border-radius: 14px;
+            padding: 30px 24px;
+            text-decoration: none;
+            color: #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            display: block;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+        }
+
+        .tool-card .icon {
+            font-size: 42px;
+            margin-bottom: 14px;
+        }
+
+        .tool-card h2 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .tool-card p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        .tool-card.coming {
+            opacity: 0.65;
+            cursor: default;
+        }
+
+        .tool-card.coming:hover {
+            transform: none;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        }
+
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+            font-size: 13px;
+            padding: 30px 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧰 Ting 的工作工具箱</h1>
+            <p>一個網址，集合所有工作小工具・手機電腦都能用</p>
+        </div>
+
+        <div class="tools">
+            <a class="tool-card" href="schedule.html">
+                <div class="icon">📅</div>
+                <h2>排程工具</h2>
+                <p>工單排程與交期追蹤，過期與即將到期自動變色提醒，多裝置即時同步。</p>
+            </a>
+
+            <a class="tool-card" href="https://lovelyyiting.github.io/super-ting/" target="_blank">
+                <div class="icon">📋</div>
+                <h2>生管即時看板</h2>
+                <p>原本的工作看板（另一個網站），點此直接開啟。</p>
+            </a>
+
+            <div class="tool-card coming">
+                <div class="icon">✨</div>
+                <h2>更多功能</h2>
+                <p>之後想加什麼工具，都可以再加一張卡片放進來。</p>
+            </div>
+        </div>
+
+        <div class="footer">GitHub Pages + Firebase 即時同步</div>
+    </div>
+</body>
+</html>
