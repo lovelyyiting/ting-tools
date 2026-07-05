@@ -66,3 +66,14 @@ input, select, textarea { border-color: var(--line) !important; }
 
 /* 卷軸與細節收斂 */
 .toolbar, .actions { border-bottom-color: var(--line) !important; }
+
+/* 窄螢幕（手機）頁首：返回鈕改為獨立一行置於標題上方，避免與換行的副標重疊 */
+@media (max-width: 480px) {
+    .header { padding-left: 16px; padding-right: 16px; }
+    .header .back-link {
+        position: static;
+        transform: none;
+        display: inline-block;
+        margin-bottom: 12px;
+    }
+}
