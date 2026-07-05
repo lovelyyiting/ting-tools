@@ -33,26 +33,21 @@
         .step-title { font-size: 15px; color: #444; font-weight: bold; margin: 6px 0 12px; }
 
         .import-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 14px; margin-bottom: 18px;
         }
-        .imp-card {
-            border: 1px solid #e5e5e5; border-radius: 10px; padding: 14px;
-        }
+        .imp-card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 16px; }
         .imp-card.main { border-color: #667eea; border-width: 2px; }
-        .imp-card h4 { font-size: 15px; color: #333; margin-bottom: 4px; }
+        .imp-card h4 { font-size: 16px; color: #333; margin-bottom: 4px; }
         .imp-card .desc { font-size: 12px; color: #888; margin-bottom: 10px; line-height: 1.5; }
-        .imp-card .status { font-size: 12px; margin-bottom: 10px; }
+        .imp-card .status { font-size: 13px; margin-bottom: 10px; line-height: 1.7; }
         .status.ok { color: #28a745; }
         .status.no { color: #bbb; }
+        .status .warn { color: #dc3545; }
         .imp-card .btns { display: flex; gap: 8px; flex-wrap: wrap; }
         .imp-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;
-            border: none; padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
-        }
-        .tpl-btn {
-            border: 1px solid #ccc; background: white; padding: 8px 12px;
-            border-radius: 8px; font-size: 12px; cursor: pointer; color: #555;
+            border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer;
         }
 
         .run-row { text-align: center; margin: 6px 0 18px; }
@@ -60,11 +55,8 @@
             background: linear-gradient(135deg, #28a745 0%, #20863a 100%); color: white;
             border: none; padding: 14px 40px; border-radius: 10px; font-size: 18px; cursor: pointer;
         }
-        .run-btn:disabled { background: #ccc; cursor: not-allowed; }
 
-        .result-head {
-            display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px;
-        }
+        .result-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
         .tab {
             border: 1px solid #ccc; background: white; padding: 8px 18px; border-radius: 18px;
             font-size: 14px; cursor: pointer; color: #555;
@@ -96,15 +88,30 @@
         <div class="header">
             <a class="back-link" href="index.html">← 首頁</a>
             <h1>🧩 缺料模擬展出工具</h1>
-            <p>匯入佔量結果＋工單開立狀況，自動查項次/批次/廠商，分成產線缺料與精密缺料</p>
+            <p>匯入今日主檔＋佔量結果，自動查項次/批次/廠商，分成產線缺料與精密缺料</p>
         </div>
 
         <div class="body">
-            <div class="step-title">① 匯入資料（工單表與對照表匯入後會記住，每天通常只要重匯「佔量結果」）</div>
-            <div class="import-grid" id="importGrid"></div>
+            <div class="step-title">① 匯入兩個檔案（每天重匯即可，會取代前一天）</div>
+            <div class="import-grid">
+                <div class="imp-card main">
+                    <h4>⭐ 佔量結果（B）</h4>
+                    <div class="desc">SAP 重新佔量完匯出的缺料明細（要展出的清單）</div>
+                    <div class="status no" id="st-allocation">尚未匯入</div>
+                    <input type="file" id="file-allocation" accept=".xlsx,.xls,.csv" class="hidden" onchange="importAllocation(this.files[0]); this.value='';">
+                    <div class="btns"><button class="imp-btn" onclick="document.getElementById('file-allocation').click()">📥 匯入佔量結果</button></div>
+                </div>
+                <div class="imp-card">
+                    <h4>📗 今日主檔（A）</h4>
+                    <div class="desc">一個檔案，內含分頁：成車工單開立狀況、精密機電開立狀況、料號廠商對照表（工具自動辨識分頁）</div>
+                    <div class="status no" id="st-master">尚未匯入</div>
+                    <input type="file" id="file-master" accept=".xlsx,.xls" class="hidden" onchange="importMaster(this.files[0]); this.value='';">
+                    <div class="btns"><button class="imp-btn" onclick="document.getElementById('file-master').click()">📥 匯入主檔</button></div>
+                </div>
+            </div>
 
             <div class="run-row">
-                <button class="run-btn" id="runBtn" onclick="explode()">🧩 展出缺料清單</button>
+                <button class="run-btn" onclick="explode()">🧩 展出缺料清單</button>
             </div>
 
             <div id="resultArea" class="hidden">
@@ -116,9 +123,7 @@
                     <div class="tab" data-g="none" onclick="switchTab('none')">未分類 <span id="cnt-none"></span></div>
                     <button class="dl-btn" onclick="downloadResult()">⬇️ 下載結果 Excel</button>
                 </div>
-                <div class="table-wrap">
-                    <table class="data" id="resultTable"></table>
-                </div>
+                <div class="table-wrap"><table class="data" id="resultTable"></table></div>
                 <div class="note">分類方式：訂單出現在成車工單表→產線；出現在精密機電工單表→精密；兩表都查不到→未分類。項次/批次由工單表帶入、廠商由料號廠商對照表帶入，查不到標「查無」。</div>
             </div>
         </div>
@@ -126,191 +131,167 @@
 
     <script src="common.js"></script>
     <script>
-        // ===== 四個資料集定義 =====
-        const SETS = {
+        // ===== 別名定義 =====
+        const ALIAS = {
             allocation: {
-                title: '佔量結果（B）', main: true,
-                desc: 'SAP 重新佔量完匯出的缺料明細（主檔，每天更新）',
-                path: 'toolbox/explode/allocation',
-                tpl: ['訂單','溯源需求','物料','MRPCn','物料短文','工廠','需求日期','需求數量','承約數量','物料短缺'],
-                tplEx: ['5004124795','40021FF0009C3','80415FF0003A9','P30','AL Exercise Bicycle','AIP2','2026/5/15',166,20,146],
-                alias: {
-                    order:['訂單','工單','工單號碼','訂單號碼'],
-                    src:['溯源需求','溯源需求元件','需求來源','成品料號','母件料號'],
-                    mat:['物料','料號','物料號碼','子件料號'],
-                    mrp:['MRPCn','MRP管制員','MRP','MRP控制員'],
-                    desc:['物料短文','物料說明','品名','物料描述','品名規格'],
-                    plant:['工廠','廠別','工廠代碼'],
-                    needDate:['需求日期','需求日','日期','系統需求日期'],
-                    needQty:['需求數量','需求量'],
-                    commitQty:['承約數量','已承諾數量','承諾數量'],
-                    shortQty:['物料短缺','短缺數量','缺料數量','物料短缺數量','短缺']
-                }
+                order:['訂單','工單','工單號碼','訂單號碼'],
+                src:['溯源需求','溯源需求元件','需求來源','成品料號','母件料號'],
+                mat:['物料','料號','物料號碼','子件料號'],
+                mrp:['MRPCn','MRP管制員','MRP','MRP控制員'],
+                desc:['物料短文','物料說明','品名','物料描述','品名規格'],
+                plant:['工廠','廠別','工廠代碼'],
+                needDate:['需求日期','需求日','日期','系統需求日期'],
+                needQty:['需求數量','需求量'],
+                commitQty:['承約數量','已承諾數量','承諾數量'],
+                shortQty:['物料短缺','短缺數量','缺料數量','物料短缺數量','短缺']
             },
-            woMain: {
-                title: '成車工單開立狀況', main: false,
-                desc: '產線（成車）工單，提供項次、批次',
-                path: 'toolbox/explode/woMain',
-                tpl: ['線別','工單','項次','批次'],
-                tplEx: ['智能1','5004124795',1,'SC3.22 No.115'],
-                alias: {
-                    order:['工單','工單號碼','訂單'],
-                    item:['項次'], batch:['批次'], line:['線別']
-                }
-            },
-            woPrecision: {
-                title: '精密機電開立狀況', main: false,
-                desc: '精密工單，提供項次、批次',
-                path: 'toolbox/explode/woPrecision',
-                tpl: ['線別','工單','項次','批次'],
-                tplEx: ['精密','5004082236',601,'PM 1-6'],
-                alias: {
-                    order:['工單','工單號碼','訂單'],
-                    item:['項次'], batch:['批次'], line:['線別']
-                }
-            },
-            vendor: {
-                title: '料號廠商對照表', main: false,
-                desc: '物料 → 廠商，用來帶出廠商欄',
-                path: 'toolbox/explode/vendor',
-                tpl: ['物料','供應商','廠商'],
-                tplEx: ['1127-BB2460-002','1000530','張永'],
-                alias: {
-                    mat:['物料','料號'],
-                    vendor:['廠商','供應商名稱'],
-                }
-            }
+            wo: { order:['工單','工單號碼','訂單'], item:['項次'], batch:['批次'], line:['線別'] },
+            vendor: { mat:['物料','料號'], vendor:['廠商','供應商名稱'] }
+        };
+        // 主檔分頁辨識
+        const SHEET_IS = {
+            woMain: n => n.includes('成車'),
+            woPrecision: n => n.includes('精密'),
+            vendor: n => n.includes('廠商')
         };
 
-        const store = {};   // key → {updatedAt, rows:[{field:val}]}
-        let result = { main: [], prec: [], none: [] };
-        let currentTab = 'main';
+        const store = {
+            allocation: load('allocation'),
+            woMain: load('woMain'),
+            woPrecision: load('woPrecision'),
+            vendor: load('vendor')
+        };
+        function load(k){ return JSON.parse(localStorage.getItem('exp_'+k) || 'null') || { updatedAt:'', rows:[] }; }
+        function save(k){ localStorage.setItem('exp_'+k, JSON.stringify(store[k])); if(db) db.ref('toolbox/explode/'+k).set(store[k]); }
 
+        let result = { main: [], prec: [], none: [] };
         const OUT_COLS = ['訂單','項次','批次','溯源需求','物料','MRPCn','物料短文','工廠','需求日期','需求數量','承約數量','物料短缺','廠商'];
 
-        function initCards() {
-            document.getElementById('importGrid').innerHTML = Object.entries(SETS).map(([k, s]) => `
-                <div class="imp-card ${s.main ? 'main' : ''}">
-                    <h4>${s.main ? '⭐ ' : ''}${s.title}</h4>
-                    <div class="desc">${s.desc}</div>
-                    <div class="status no" id="st-${k}">尚未匯入</div>
-                    <input type="file" id="file-${k}" accept=".xlsx,.xls,.csv" class="hidden" onchange="onImport('${k}', this.files[0]); this.value='';">
-                    <div class="btns">
-                        <button class="imp-btn" onclick="document.getElementById('file-${k}').click()">📥 匯入</button>
-                        <button class="tpl-btn" onclick="downloadTpl('${k}')">⬇️ 範本</button>
-                    </div>
-                </div>`).join('');
-        }
-
         function initData() {
-            Object.entries(SETS).forEach(([k, s]) => {
-                store[k] = JSON.parse(localStorage.getItem('exp_' + k) || 'null') || { updatedAt: '', rows: [] };
-                renderStatus(k);
-                if (db) {
-                    db.ref(s.path).on('value', snap => {
+            renderAllocStatus(); renderMasterStatus();
+            if (db) {
+                ['allocation','woMain','woPrecision','vendor'].forEach(k => {
+                    db.ref('toolbox/explode/'+k).on('value', snap => {
                         const v = snap.val();
                         if (v) {
-                            if (!Array.isArray(v.rows)) v.rows = Object.values(v.rows || {});
-                            store[k] = v;
-                            localStorage.setItem('exp_' + k, JSON.stringify(v));
-                            renderStatus(k);
+                            if (!Array.isArray(v.rows)) v.rows = Object.values(v.rows||{});
+                            store[k] = v; localStorage.setItem('exp_'+k, JSON.stringify(v));
+                            renderAllocStatus(); renderMasterStatus();
                         }
                     });
-                }
-            });
-        }
-
-        function renderStatus(k) {
-            const el = document.getElementById('st-' + k);
-            if (!el) return;
-            const d = store[k];
-            if (d && d.rows && d.rows.length) {
-                el.className = 'status ok';
-                el.textContent = `✅ ${d.rows.length} 筆` + (d.updatedAt ? `・${d.updatedAt}` : '');
-            } else {
-                el.className = 'status no';
-                el.textContent = '尚未匯入';
+                });
             }
         }
 
-        // 讀 Excel 成陣列的陣列，自動偵測標題列（跳過表單抬頭）並依別名對應欄位
-        function readMapped(file, alias, cb) {
+        function renderAllocStatus() {
+            const el = document.getElementById('st-allocation'); const d = store.allocation;
+            if (d.rows && d.rows.length) { el.className='status ok'; el.textContent=`✅ ${d.rows.length} 筆`+(d.updatedAt?`・${d.updatedAt}`:''); }
+            else { el.className='status no'; el.textContent='尚未匯入'; }
+        }
+        function renderMasterStatus() {
+            const el = document.getElementById('st-master');
+            const m = store.woMain.rows.length, p = store.woPrecision.rows.length, v = store.vendor.rows.length;
+            if (m||p||v) {
+                el.className = 'status ok';
+                el.innerHTML =
+                    `成車工單：${m?m+' 筆':'<span class="warn">未找到分頁</span>'}<br>` +
+                    `精密機電：${p?p+' 筆':'<span class="warn">未找到分頁</span>'}<br>` +
+                    `廠商對照：${v?v+' 筆':'<span class="warn">未找到分頁</span>'}` +
+                    (store.woMain.updatedAt?`<br><span style="color:#999">${store.woMain.updatedAt}</span>`:'');
+            } else { el.className='status no'; el.textContent='尚未匯入'; }
+        }
+
+        // 把一個工作表(aoa)依別名對應成物件陣列，自動偵測標題列（跳過表單抬頭）
+        function mapAoa(aoa, alias) {
+            if (!aoa.length) return { rows: [], matched: [] };
+            let bestRow = 0, bestScore = -1;
+            for (let i = 0; i < Math.min(aoa.length, 10); i++) {
+                const cells = (aoa[i]||[]).map(x => String(x).trim());
+                let score = 0;
+                Object.values(alias).forEach(al => { if (cells.some(c => al.includes(c))) score++; });
+                if (score > bestScore) { bestScore = score; bestRow = i; }
+            }
+            const header = (aoa[bestRow]||[]).map(x => String(x).trim());
+            const colIdx = {};
+            Object.entries(alias).forEach(([f, al]) => {
+                const idx = header.findIndex(h => al.includes(h));
+                if (idx >= 0) colIdx[f] = idx;
+            });
+            const rows = [];
+            for (let i = bestRow + 1; i < aoa.length; i++) {
+                const r = aoa[i];
+                if (!r || r.every(c => String(c).trim() === '')) continue;
+                const obj = {};
+                Object.entries(colIdx).forEach(([f, idx]) => { obj[f] = r[idx]; });
+                rows.push(obj);
+            }
+            return { rows, matched: Object.keys(colIdx) };
+        }
+
+        function sheetToAoa(wb, name) {
+            return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' });
+        }
+
+        function readWorkbook(file, cb) {
             const reader = new FileReader();
             reader.onload = e => {
-                try {
-                    const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-                    if (!aoa.length) { cb(new Error('檔案沒有資料')); return; }
-                    // 找標題列：前 10 列中，命中別名最多的那一列
-                    let bestRow = 0, bestScore = -1;
-                    for (let i = 0; i < Math.min(aoa.length, 10); i++) {
-                        const cells = aoa[i].map(x => String(x).trim());
-                        let score = 0;
-                        Object.values(alias).forEach(al => { if (cells.some(c => al.includes(c))) score++; });
-                        if (score > bestScore) { bestScore = score; bestRow = i; }
-                    }
-                    const header = aoa[bestRow].map(x => String(x).trim());
-                    const colIdx = {};
-                    Object.entries(alias).forEach(([field, al]) => {
-                        const idx = header.findIndex(h => al.includes(h));
-                        if (idx >= 0) colIdx[field] = idx;
-                    });
-                    const rows = [];
-                    for (let i = bestRow + 1; i < aoa.length; i++) {
-                        const r = aoa[i];
-                        if (!r || r.every(c => String(c).trim() === '')) continue;
-                        const obj = {};
-                        Object.entries(colIdx).forEach(([field, idx]) => { obj[field] = r[idx]; });
-                        rows.push(obj);
-                    }
-                    cb(null, { rows, matched: Object.keys(colIdx), header });
-                } catch (err) { cb(err); }
+                try { cb(null, XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false })); }
+                catch (err) { cb(err); }
             };
             reader.onerror = () => cb(new Error('讀檔失敗'));
             reader.readAsArrayBuffer(file);
         }
 
-        function onImport(k, file) {
+        function importAllocation(file) {
             if (!file) return;
-            const s = SETS[k];
-            readMapped(file, s.alias, (err, res) => {
+            readWorkbook(file, (err, wb) => {
                 if (err) { alert('讀取失敗：' + err.message); return; }
-                if (!res.rows.length) {
-                    alert('找不到資料列。請確認欄位標題包含：' + s.tpl.join('、') + '\n（可按「範本」下載格式）');
-                    return;
-                }
-                // 主檔必要欄位檢查
-                if (k === 'allocation' && !res.matched.includes('order')) {
-                    alert('佔量結果缺少「訂單」欄位，無法比對工單。請確認標題列。'); return;
-                }
-                const data = { updatedAt: new Date().toLocaleString('zh-TW'), rows: res.rows };
-                store[k] = data;
-                localStorage.setItem('exp_' + k, JSON.stringify(data));
-                if (db) db.ref(s.path).set(data);
-                renderStatus(k);
-                const miss = Object.keys(s.alias).filter(f => !res.matched.includes(f));
-                alert(`「${s.title}」已匯入 ${res.rows.length} 筆` +
-                    (miss.length ? `\n（未對應到欄位：${miss.join('、')}，若非必要可忽略）` : ''));
+                const aoa = sheetToAoa(wb, wb.SheetNames[0]);
+                const res = mapAoa(aoa, ALIAS.allocation);
+                if (!res.rows.length) { alert('佔量結果找不到資料列，請確認欄位標題（訂單、物料、需求數量…）'); return; }
+                if (!res.matched.includes('order')) { alert('佔量結果缺少「訂單」欄位，無法比對工單'); return; }
+                store.allocation = { updatedAt: new Date().toLocaleString('zh-TW'), rows: res.rows };
+                save('allocation'); renderAllocStatus();
+                const miss = Object.keys(ALIAS.allocation).filter(f => !res.matched.includes(f));
+                alert(`佔量結果已匯入 ${res.rows.length} 筆` + (miss.length ? `\n（未對應欄位：${miss.join('、')}，若非必要可忽略）` : ''));
             });
         }
 
-        function downloadTpl(k) {
-            const s = SETS[k];
-            downloadTemplate(s.title + '_範本.xlsx', s.tpl, s.tplEx);
+        function importMaster(file) {
+            if (!file) return;
+            readWorkbook(file, (err, wb) => {
+                if (err) { alert('讀取失敗：' + err.message); return; }
+                const found = { woMain: null, woPrecision: null, vendor: null };
+                wb.SheetNames.forEach(n => {
+                    for (const role of ['woMain', 'woPrecision', 'vendor']) {
+                        if (!found[role] && SHEET_IS[role](n)) found[role] = n;
+                    }
+                });
+                const now = new Date().toLocaleString('zh-TW');
+                const report = [];
+                [['woMain','wo','成車工單開立狀況'], ['woPrecision','wo','精密機電開立狀況'], ['vendor','vendor','料號廠商對照表']]
+                .forEach(([role, aliasKey, label]) => {
+                    if (found[role]) {
+                        const res = mapAoa(sheetToAoa(wb, found[role]), ALIAS[aliasKey]);
+                        store[role] = { updatedAt: now, rows: res.rows };
+                        save(role);
+                        report.push(`✅ ${label}（分頁「${found[role]}」）：${res.rows.length} 筆`);
+                    } else {
+                        report.push(`⚠️ 找不到「${label}」分頁`);
+                    }
+                });
+                renderMasterStatus();
+                alert('主檔匯入完成：\n' + report.join('\n') +
+                    '\n\n偵測到的分頁：' + wb.SheetNames.join('、'));
+            });
         }
 
-        // 日期：SAP 序號（數字或數字字串）或日期字串 → yyyy/m/d
         function fmtNeed(v) {
             if (v == null || v === '') return '';
-            // 純數字（含以字串形式存的序號）視為 Excel 日期序號
             const asNum = Number(v);
             let ds = '';
-            if (!isNaN(asNum) && asNum > 20000 && asNum < 90000) {
-                ds = parseDateCell(asNum);
-            } else {
-                ds = parseDateCell(v);
-            }
+            if (!isNaN(asNum) && asNum > 20000 && asNum < 90000) ds = parseDateCell(asNum);
+            else ds = parseDateCell(v);
             if (!ds) return String(v);
             const [y, m, d] = ds.split('-');
             return `${y}/${Number(m)}/${Number(d)}`;
@@ -318,16 +299,14 @@
 
         function explode() {
             const B = store.allocation;
-            if (!B || !B.rows || !B.rows.length) { alert('請先匯入「佔量結果（B）」'); return; }
-            if ((!store.woMain.rows.length) && (!store.woPrecision.rows.length)) {
-                alert('請至少匯入一張工單開立狀況表（成車或精密），才能分類與查項次批次'); return;
+            if (!B.rows || !B.rows.length) { alert('請先匯入「佔量結果（B）」'); return; }
+            if (!store.woMain.rows.length && !store.woPrecision.rows.length) {
+                alert('請先匯入「今日主檔」（需含成車或精密工單開立狀況分頁）'); return;
             }
-
-            // 建工單索引：訂單 → {item, batch}
             const mainMap = {}, precMap = {}, vendorMap = {};
-            store.woMain.rows.forEach(r => { if (r.order != null && r.order !== '') mainMap[String(r.order).trim()] = r; });
-            store.woPrecision.rows.forEach(r => { if (r.order != null && r.order !== '') precMap[String(r.order).trim()] = r; });
-            store.vendor.rows.forEach(r => { if (r.mat != null && r.mat !== '') vendorMap[String(r.mat).trim()] = r.vendor; });
+            store.woMain.rows.forEach(r => { const k=String(r.order??'').trim(); if(k) mainMap[k]=r; });
+            store.woPrecision.rows.forEach(r => { const k=String(r.order??'').trim(); if(k) precMap[k]=r; });
+            store.vendor.rows.forEach(r => { const k=String(r.mat??'').trim(); if(k) vendorMap[k]=r.vendor; });
 
             const NA = '查無';
             result = { main: [], prec: [], none: [] };
@@ -337,84 +316,64 @@
                 const order = String(r.order ?? '').trim();
                 const mat = String(r.mat ?? '').trim();
                 let group, wo = null;
-                if (mainMap[order]) { group = 'main'; wo = mainMap[order]; }
-                else if (precMap[order]) { group = 'prec'; wo = precMap[order]; }
-                else { group = 'none'; }
-
-                const item = wo && wo.item !== '' && wo.item != null ? wo.item : NA;
-                const batch = wo && wo.batch !== '' && wo.batch != null ? wo.batch : NA;
-                const vendor = vendorMap[mat] != null && vendorMap[mat] !== '' ? vendorMap[mat] : NA;
-                if (item === NA) naItem++;
-                if (vendor === NA) naVendor++;
-
+                if (mainMap[order]) { group='main'; wo=mainMap[order]; }
+                else if (precMap[order]) { group='prec'; wo=precMap[order]; }
+                else { group='none'; }
+                const item = wo && wo.item!=='' && wo.item!=null ? wo.item : NA;
+                const batch = wo && wo.batch!=='' && wo.batch!=null ? wo.batch : NA;
+                const vendor = vendorMap[mat]!=null && vendorMap[mat]!=='' ? vendorMap[mat] : NA;
+                if (item===NA) naItem++;
+                if (vendor===NA) naVendor++;
                 result[group].push({
-                    '訂單': order, '項次': item, '批次': batch,
-                    '溯源需求': r.src ?? '', '物料': mat, 'MRPCn': r.mrp ?? '',
-                    '物料短文': r.desc ?? '', '工廠': r.plant ?? '',
-                    '需求日期': fmtNeed(r.needDate), '需求數量': r.needQty ?? '',
-                    '承約數量': r.commitQty ?? '', '物料短缺': r.shortQty ?? '',
-                    '廠商': vendor
+                    '訂單':order, '項次':item, '批次':batch, '溯源需求':r.src??'', '物料':mat,
+                    'MRPCn':r.mrp??'', '物料短文':r.desc??'', '工廠':r.plant??'',
+                    '需求日期':fmtNeed(r.needDate), '需求數量':r.needQty??'',
+                    '承約數量':r.commitQty??'', '物料短缺':r.shortQty??'', '廠商':vendor
                 });
             });
 
-            // 依項次排序（數字優先，查無排最後）
-            const byItem = (a, b) => {
-                const na = a['項次'] === NA, nb = b['項次'] === NA;
-                if (na && nb) return 0; if (na) return 1; if (nb) return -1;
-                const x = Number(a['項次']), y = Number(b['項次']);
-                if (!isNaN(x) && !isNaN(y)) return x - y;
+            const byItem = (a,b) => {
+                const na=a['項次']===NA, nb=b['項次']===NA;
+                if(na&&nb) return 0; if(na) return 1; if(nb) return -1;
+                const x=Number(a['項次']), y=Number(b['項次']);
+                if(!isNaN(x)&&!isNaN(y)) return x-y;
                 return String(a['項次']).localeCompare(String(b['項次']));
             };
             result.main.sort(byItem); result.prec.sort(byItem); result.none.sort(byItem);
 
-            // 警示區
             const warns = [];
-            if (result.none.length) warns.push(`有 <b>${result.none.length}</b> 筆訂單在兩張工單表都查不到（歸「未分類」，請確認工單表是否為最新）`);
+            if (result.none.length) warns.push(`有 <b>${result.none.length}</b> 筆訂單在兩張工單表都查不到（歸「未分類」，請確認主檔是否為最新）`);
             if (naItem) warns.push(`有 <b>${naItem}</b> 筆查無項次/批次`);
             if (naVendor) warns.push(`有 <b>${naVendor}</b> 筆查無廠商（可更新料號廠商對照表）`);
-            document.getElementById('warnArea').innerHTML = warns.length
-                ? `<div class="warnbox">⚠️ ${warns.join('<br>')}</div>` : '';
+            document.getElementById('warnArea').innerHTML = warns.length ? `<div class="warnbox">⚠️ ${warns.join('<br>')}</div>` : '';
 
             document.getElementById('cnt-main').textContent = `(${result.main.length})`;
             document.getElementById('cnt-prec').textContent = `(${result.prec.length})`;
             document.getElementById('cnt-none').textContent = `(${result.none.length})`;
+            if (db) db.ref('toolbox/explode/result').set({ updatedAt: new Date().toLocaleString('zh-TW'), result });
             document.getElementById('resultArea').classList.remove('hidden');
             switchTab('main');
             document.getElementById('resultArea').scrollIntoView({ behavior: 'smooth' });
         }
 
         function switchTab(g) {
-            currentTab = g;
             document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.g === g));
             const rows = result[g] || [];
             const table = document.getElementById('resultTable');
-            if (!rows.length) {
-                table.innerHTML = `<tr><td><div class="empty-hint">此分類沒有資料</div></td></tr>`;
-                return;
-            }
+            if (!rows.length) { table.innerHTML = `<tr><td><div class="empty-hint">此分類沒有資料</div></td></tr>`; return; }
             table.innerHTML =
                 '<tr>' + OUT_COLS.map(c => `<th>${c}</th>`).join('') + '</tr>' +
-                rows.map(r => '<tr>' + OUT_COLS.map(c =>
-                    `<td class="${r[c] === '查無' ? 'na' : ''}">${esc(r[c])}</td>`).join('') + '</tr>').join('');
+                rows.map(r => '<tr>' + OUT_COLS.map(c => `<td class="${r[c]==='查無'?'na':''}">${esc(r[c])}</td>`).join('') + '</tr>').join('');
         }
 
         function downloadResult() {
-            if (!result.main.length && !result.prec.length && !result.none.length) {
-                alert('沒有可下載的結果，請先展出'); return;
-            }
+            if (!result.main.length && !result.prec.length && !result.none.length) { alert('沒有可下載的結果，請先展出'); return; }
             const wb = XLSX.utils.book_new();
-            const addSheet = (rows, name) => {
-                if (!rows.length) return;
-                const aoa = [OUT_COLS].concat(rows.map(r => OUT_COLS.map(c => r[c])));
-                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), name);
-            };
-            addSheet(result.main, '產線缺料');
-            addSheet(result.prec, '精密缺料');
-            addSheet(result.none, '未分類');
+            const add = (rows, name) => { if(rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([OUT_COLS].concat(rows.map(r=>OUT_COLS.map(c=>r[c])))), name); };
+            add(result.main, '產線缺料'); add(result.prec, '精密缺料'); add(result.none, '未分類');
             XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
         }
 
-        initCards();
         initData();
     </script>
 </body>
