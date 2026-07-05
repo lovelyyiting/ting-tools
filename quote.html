@@ -219,6 +219,7 @@
                 <div style="margin-top:12px;text-align:center">
                     <button class="btn" onclick="evaluate()">🔍 開始評估</button>
                 </div>
+                <div id="evalMsg" style="margin-top:10px;text-align:center;font-size:14px;color:#dc3545;font-weight:bold"></div>
             </div>
 
             <!-- 結果 -->
@@ -324,11 +325,14 @@
             const targetDate = document.getElementById('targetDate').value;
             const bufS = num(document.getElementById('bufSchedule').value);
             const bufP = num(document.getElementById('bufShip').value);
-            if (!orderDate) { alert('請選擇下單日期'); return; }
+            const msg = document.getElementById('evalMsg');
+            const showMsg = t => { msg.textContent = t; };
+            showMsg('');
+            if (!orderDate) { showMsg('⚠️ 請先選擇「下單日期」'); return; }
             const parts = document.getElementById('bomInput').value
                 .split(/[\n,;\t]/).map(s => s.trim()).filter(Boolean);
-            if (!parts.length) { alert('請至少輸入一個料號'); return; }
-            if (!ltData.rows || !ltData.rows.length) { alert('交期表尚無資料，請先在下方「交期表維護」匯入 Excel'); return; }
+            if (!parts.length) { showMsg('⚠️ 請在上方欄位至少輸入一個料號（一行一個）'); return; }
+            if (!ltData.rows || !ltData.rows.length) { showMsg('⚠️ 交期表尚無資料，請先在最下方「交期表維護」匯入 Excel'); return; }
 
             const detail = parts.map(p => {
                 const found = ltMap[p] !== undefined;
