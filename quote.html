@@ -217,7 +217,7 @@
                 <h3>② BOM 料號清單 <span style="font-weight:normal;color:#999;font-size:13px">（一行一個料號，可直接從 Excel 貼上）</span></h3>
                 <textarea id="bomInput" placeholder="2110-CP041A-044&#10;2110-CP041A-048&#10;2110-CP041A-050"></textarea>
                 <div style="margin-top:12px;text-align:center">
-                    <button class="btn" onclick="evaluate()">🔍 開始評估</button>
+                    <button class="btn" id="evalBtn">🔍 開始評估</button>
                 </div>
                 <div id="evalMsg" style="margin-top:10px;text-align:center;font-size:14px;color:#dc3545;font-weight:bold"></div>
             </div>
@@ -320,7 +320,7 @@
             }
         }
 
-        function evaluate() {
+        function runEvaluate() {
             const orderDate = document.getElementById('orderDate').value;
             const targetDate = document.getElementById('targetDate').value;
             const bufS = num(document.getElementById('bufSchedule').value);
@@ -379,6 +379,7 @@
             document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
         }
 
+        document.getElementById('evalBtn').addEventListener('click', runEvaluate);
         initData();
     </script>
 </body>
