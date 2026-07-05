@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>遠期排程展算</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 10px; }
+        .container { max-width: 1350px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; position: relative; }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: white; text-decoration: none; font-size: 14px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #eee; align-items: center; }
+        .toolbar .ctrl { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #444; }
+        .toolbar input[type=date] { padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; }
+        .run-btn { background: linear-gradient(135deg, #28a745 0%, #20863a 100%); color: white; border: none; padding: 10px 22px; border-radius: 8px; font-size: 15px; cursor: pointer; }
+        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 9px 16px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .btn-sub { border: 1px solid #ccc; background: white; padding: 8px 13px; border-radius: 8px; font-size: 13px; cursor: pointer; color: #555; }
+        .meta { font-size: 12px; color: #888; margin-left: auto; }
+        .warnbox { background: #fff8e6; border: 1px solid #ffe08a; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #8a6d00; margin: 12px 20px 0; line-height: 1.6; }
+        .panel { padding: 12px 20px 30px; }
+        .group-title { font-size: 16px; font-weight: bold; color: #445; margin: 16px 0 6px; padding-left: 6px; border-left: 4px solid #667eea; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1150px; }
+        table.data th { background: #f5f6fa; padding: 7px 6px; text-align: left; color: #555; white-space: nowrap; position: sticky; top: 0; }
+        table.data td { padding: 6px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        tr.late td { background: #fff5f5; }
+        tr.pinned td { background: #eef4ff; }
+        .pin-btn { cursor: pointer; border: none; background: none; font-size: 15px; }
+        .diff-late { color: #dc3545; font-weight: bold; }
+        .diff-ok { color: #28a745; }
+        .row-act { cursor: pointer; color: #667eea; border: none; background: none; font-size: 13px; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
+        .hidden { display: none; }
+        .note { font-size: 12px; color: #999; margin: 12px 20px; line-height: 1.7; }
+
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; padding: 20px; overflow-y: auto; }
+        .modal.show { display: flex; align-items: flex-start; justify-content: center; }
+        .modal-box { background: white; border-radius: 12px; padding: 22px; width: 100%; max-width: 480px; margin-top: 30px; }
+        .modal-box h3 { margin-bottom: 14px; color: #333; }
+        .fr { margin-bottom: 10px; }
+        .fr label { display: block; font-size: 13px; color: #555; margin-bottom: 3px; }
+        .fr input, .fr select { width: 100%; padding: 9px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; font-family: inherit; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+        .modal-actions button { flex: 1; padding: 11px; border-radius: 8px; border: none; font-size: 15px; cursor: pointer; }
+        .save-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .cancel-btn { background: #eee; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>🏭 遠期排程展算</h1>
+            <p>依產別分線、行事曆小時產能、逐筆佔用，算出開始/結束時間與達交差異；可訂住差單</p>
+        </div>
+
+        <div class="toolbar">
+            <div class="ctrl">起排日 <input type="date" id="startDate" onchange="saveStart()"></div>
+            <button class="run-btn" onclick="runPlan()">▶ 展算排程</button>
+            <button class="btn" onclick="openAdd()">＋ 新增工單</button>
+            <button class="btn-sub" onclick="document.getElementById('ordFile').click()">📥 匯入工單</button>
+            <button class="btn-sub" onclick="downloadOrdTpl()">⬇️ 範本</button>
+            <button class="btn-sub" onclick="downloadResult()">⬇️ 下載結果</button>
+            <input type="file" id="ordFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="importOrders(this.files[0]); this.value='';">
+            <span class="meta" id="meta"></span>
+        </div>
+
+        <div id="warnArea"></div>
+        <div class="note">
+            所需工時(小時) = 工時(秒) × 數量 ÷ 3600 ÷ 人力。依「起排日」起、按各產別的行事曆可用工時逐筆往後佔用，得開始/結束時間；差異天數 = 達交日 − 結束時間（負值=延遲，紅字）。
+            點 📌 可「訂住」該工單（差單插入時鎖定不動，其餘自動重排）。工時可留空，會用下方「工時對照」以料號帶入。
+        </div>
+        <div class="panel" id="result"><div class="empty-hint">尚無工單。請「📥 匯入工單」或「＋ 新增工單」，再按「▶ 展算排程」。</div></div>
+    </div>
+
+    <!-- 新增/編輯 -->
+    <div class="modal" id="ordModal">
+        <div class="modal-box">
+            <h3 id="modalTitle">新增工單</h3>
+            <div class="grid2">
+                <div class="fr"><label>產別 *</label><input id="fLine" placeholder="智能-1 / 售服 / 精密"></div>
+                <div class="fr"><label>工單</label><input id="fWo" placeholder="工單號"></div>
+                <div class="fr"><label>物料</label><input id="fMat" placeholder="料號"></div>
+                <div class="fr"><label>批次</label><input id="fBatch"></div>
+                <div class="fr"><label>車種</label><input id="fModel"></div>
+                <div class="fr"><label>數量 *</label><input id="fQty" type="number"></div>
+                <div class="fr"><label>工時(秒/pc)</label><input id="fSec" type="number" placeholder="留空則以料號帶入"></div>
+                <div class="fr"><label>人力</label><input id="fMan" type="number" value="1"></div>
+                <div class="fr"><label>達交日</label><input id="fDue" type="date"></div>
+                <div class="fr"><label>備註</label><input id="fNote"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="save-btn" onclick="saveOrder()">儲存</button>
+                <button class="cancel-btn" onclick="closeModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706a"></script>
+    <script>
+        const P_ORDERS = 'toolbox/planning/orders';
+        const P_START = 'toolbox/planning/startDate';
+        const P_WT = 'toolbox/planning/worktime';
+        const P_CAL = 'toolbox/calendar/hours';
+
+        let orders = {};       // id → order
+        let startDate = todayStr();
+        let worktime = {};     // mat → sec
+        let cal = { defaultWeekday: DEFAULT_WEEKDAY_HOURS, days: {} };
+        let editingId = null;
+        let lastResult = [];   // 展算後的扁平列（含分組）
+
+        const ALIAS = {
+            line:['產別','產線','線別'],
+            wo:['工單','工單號','工單號碼','訂單'],
+            mat:['物料','料號'],
+            batch:['批次'],
+            model:['車種','車型','車種名稱'],
+            qty:['需再開立數量','數量','需求數量','需求量'],
+            due:['達交日/成車需求日','達交日','成車需求日','交期','需求日','需求日期'],
+            sec:['工時','單位工時','工時(秒)','工時（秒）','秒'],
+            man:['人力','人數','人力數'],
+            note:['備註','說明'],
+            pin:['訂住','鎖定','凍結']
+        };
+
+        function initData() {
+            orders = JSON.parse(localStorage.getItem('plan_orders') || '{}');
+            startDate = localStorage.getItem('plan_start') || todayStr();
+            worktime = JSON.parse(localStorage.getItem('plan_wt') || '{}');
+            cal = JSON.parse(localStorage.getItem('calHours') || 'null') || cal;
+            document.getElementById('startDate').value = startDate;
+            renderMeta();
+            if (db) {
+                db.ref(P_ORDERS).on('value', s => { orders = s.val() || {}; localStorage.setItem('plan_orders', JSON.stringify(orders)); renderMeta(); });
+                db.ref(P_START).on('value', s => { if (s.val()) { startDate = s.val(); document.getElementById('startDate').value = startDate; } });
+                db.ref(P_WT).on('value', s => { worktime = s.val() || {}; localStorage.setItem('plan_wt', JSON.stringify(worktime)); });
+                db.ref(P_CAL).on('value', s => { if (s.val()) { cal = s.val(); localStorage.setItem('calHours', JSON.stringify(cal)); } });
+            }
+        }
+        function renderMeta() {
+            document.getElementById('meta').textContent = `共 ${Object.keys(orders).length} 張工單`;
+        }
+        function saveStart() {
+            startDate = document.getElementById('startDate').value || todayStr();
+            localStorage.setItem('plan_start', startDate);
+            if (db) db.ref(P_START).set(startDate);
+        }
+        function persistOrders() {
+            localStorage.setItem('plan_orders', JSON.stringify(orders));
+            if (db) db.ref(P_ORDERS).set(orders);
+            renderMeta();
+        }
+
+        function nextSeq() {
+            const s = Object.values(orders).map(o => o.seq || 0);
+            return (s.length ? Math.max(...s) : 0) + 1;
+        }
+
+        function openAdd() {
+            editingId = null;
+            document.getElementById('modalTitle').textContent = '新增工單';
+            ['fLine','fWo','fMat','fBatch','fModel','fQty','fSec','fNote'].forEach(i => document.getElementById(i).value = '');
+            document.getElementById('fMan').value = 1;
+            document.getElementById('fDue').value = '';
+            document.getElementById('ordModal').classList.add('show');
+        }
+        function editOrder(id) {
+            editingId = id; const o = orders[id];
+            document.getElementById('modalTitle').textContent = '編輯工單';
+            document.getElementById('fLine').value = o.line || '';
+            document.getElementById('fWo').value = o.wo || '';
+            document.getElementById('fMat').value = o.mat || '';
+            document.getElementById('fBatch').value = o.batch || '';
+            document.getElementById('fModel').value = o.model || '';
+            document.getElementById('fQty').value = o.qty || '';
+            document.getElementById('fSec').value = o.sec || '';
+            document.getElementById('fMan').value = o.man || 1;
+            document.getElementById('fDue').value = o.due || '';
+            document.getElementById('fNote').value = o.note || '';
+            document.getElementById('ordModal').classList.add('show');
+        }
+        function closeModal() { document.getElementById('ordModal').classList.remove('show'); editingId = null; }
+        function saveOrder() {
+            const line = document.getElementById('fLine').value.trim();
+            const qty = num(document.getElementById('fQty').value);
+            if (!line) { alert('請輸入產別'); return; }
+            if (!qty) { alert('請輸入數量'); return; }
+            const id = editingId || ('p' + Date.now());
+            const prev = orders[id] || {};
+            orders[id] = {
+                ...prev, line, qty,
+                wo: document.getElementById('fWo').value.trim(),
+                mat: document.getElementById('fMat').value.trim(),
+                batch: document.getElementById('fBatch').value.trim(),
+                model: document.getElementById('fModel').value.trim(),
+                sec: num(document.getElementById('fSec').value),
+                man: num(document.getElementById('fMan').value) || 1,
+                due: document.getElementById('fDue').value,
+                note: document.getElementById('fNote').value.trim(),
+                seq: prev.seq || nextSeq(),
+                pinned: prev.pinned || false
+            };
+            closeModal(); persistOrders(); runPlan();
+        }
+        function removeOrder(id) { if (confirm('刪除這張工單？')) { delete orders[id]; persistOrders(); runPlan(); } }
+
+        function togglePin(id) {
+            const o = orders[id]; if (!o) return;
+            if (o.pinned) { o.pinned = false; delete o.pinStart; delete o.pinEnd; }
+            else {
+                // 訂住：把目前展算出的開始/結束凍結起來
+                const r = lastResult.find(x => x.id === id);
+                if (!r || !r.start) { alert('請先「展算排程」算出日期後再訂住'); return; }
+                o.pinned = true; o.pinStart = r.start; o.pinEnd = r.end;
+            }
+            persistOrders(); runPlan();
+        }
+
+        function importOrders(file) {
+            if (!file) return;
+            readExcelFile(file, (err, rows) => {
+                if (err) { alert('讀取失敗：' + err.message); return; }
+                if (!rows.length) { alert('沒有資料'); return; }
+                const map = buildLocalMap(rows[0]);
+                let added = 0;
+                let seq = nextSeq();
+                rows.forEach(r => {
+                    const line = String(get(r, map, 'line')).trim();
+                    const qty = num(get(r, map, 'qty'));
+                    if (!line || !qty) return;
+                    const id = 'p' + Date.now() + '_' + (added++);
+                    orders[id] = {
+                        line, qty,
+                        wo: String(get(r, map, 'wo')).trim(),
+                        mat: String(get(r, map, 'mat')).trim(),
+                        batch: String(get(r, map, 'batch')).trim(),
+                        model: String(get(r, map, 'model')).trim(),
+                        sec: num(get(r, map, 'sec')),
+                        man: num(get(r, map, 'man')) || 1,
+                        due: parseDateCell(get(r, map, 'due')),
+                        note: String(get(r, map, 'note')).trim(),
+                        seq: seq++,
+                        pinned: false
+                    };
+                });
+                if (!added) { alert('沒有匯入資料。請確認至少有「產別」與「數量」欄位。'); return; }
+                persistOrders(); runPlan();
+                alert(`已匯入 ${added} 張工單`);
+            });
+        }
+        function buildLocalMap(row) {
+            const keys = Object.keys(row); const map = {};
+            Object.entries(ALIAS).forEach(([f, al]) => { const k = keys.find(k => al.includes(String(k).trim())); if (k !== undefined) map[f] = k; });
+            return map;
+        }
+        function get(row, map, f) { return map[f] !== undefined ? row[map[f]] : ''; }
+
+        function downloadOrdTpl() {
+            downloadTemplate('遠期排程工單_範本.xlsx',
+                ['產別','工單','物料','批次','車種','數量','工時','人力','達交日','備註'],
+                ['智能-1','5004165560','40024WB0001B1','No.25','AirPro',108,495,1,'2026-06-20','']);
+        }
+
+        // 展算：依產別分線，各自從起排日佔用產能
+        function runPlan() {
+            const list = Object.entries(orders).map(([id, o]) => ({ id, ...o }));
+            if (!list.length) { document.getElementById('result').innerHTML = '<div class="empty-hint">尚無工單。</div>'; lastResult = []; return; }
+
+            // 依產別分組
+            const groups = {};
+            list.forEach(o => { (groups[o.line || '(未填產別)'] = groups[o.line || '(未填產別)'] || []).push(o); });
+
+            const out = [];
+            let naSec = 0;
+            Object.keys(groups).sort().forEach(line => {
+                const items = groups[line].sort((a, b) => (a.seq || 0) - (b.seq || 0));
+                let cursor = { date: startDate, remain: dayHours(startDate, cal) };
+                let cum = 0;
+                items.forEach(o => {
+                    let sec = num(o.sec);
+                    if (!sec && o.mat && worktime[o.mat]) sec = num(worktime[o.mat]);
+                    if (!sec) naSec++;
+                    const man = num(o.man) || 1;
+                    const hours = sec * num(o.qty) / 3600 / man;
+                    let start, end;
+                    if (o.pinned && o.pinStart && o.pinEnd) {
+                        start = o.pinStart; end = o.pinEnd;
+                        // 訂住的佔用產能：游標推進到其結束日之後
+                        cursor = { date: end, remain: 0 };
+                    } else {
+                        const r = consumeHours(cursor, hours, cal);
+                        start = r.start; end = r.end; cursor = r.cursor;
+                    }
+                    cum += hours;
+                    const diff = o.due ? Math.round((new Date(o.due+'T00:00:00') - new Date(end+'T00:00:00')) / 86400000) : null;
+                    out.push({ id: o.id, line, wo: o.wo, mat: o.mat, batch: o.batch, model: o.model,
+                        qty: o.qty, sec, man, hours, cum, start, end, due: o.due, diff, note: o.note, pinned: o.pinned });
+                });
+            });
+            lastResult = out;
+            renderResult(out, groups, naSec);
+        }
+
+        function renderResult(out, groups, naSec) {
+            const warns = [];
+            const late = out.filter(r => r.diff != null && r.diff < 0).length;
+            if (late) warns.push(`有 <b>${late}</b> 張工單結束時間晚於達交日（紅底）`);
+            if (naSec) warns.push(`有 <b>${naSec}</b> 張工單查無工時（秒），所需工時以 0 計，請補工時或工時對照`);
+            document.getElementById('warnArea').innerHTML = warns.length ? `<div class="warnbox">⚠️ ${warns.join('<br>')}</div>` : '';
+
+            const byLine = {};
+            out.forEach(r => (byLine[r.line] = byLine[r.line] || []).push(r));
+            let html = '';
+            Object.keys(byLine).sort().forEach(line => {
+                const rows = byLine[line];
+                const lineHours = Math.round(rows.reduce((s, r) => s + r.hours, 0) * 10) / 10;
+                html += `<div class="group-title">${esc(line)}　（${rows.length} 張・共 ${lineHours} 小時）</div>
+                <div class="table-wrap"><table class="data">
+                <tr><th>📌</th><th>順序</th><th>工單</th><th>物料</th><th>批次</th><th>車種</th><th>數量</th><th>工時(秒)</th><th>人力</th>
+                    <th>所需工時(小時)</th><th>累計工時</th><th>開始時間</th><th>結束時間</th><th>達交日</th><th>差異天數</th><th>備註</th><th></th></tr>` +
+                rows.map((r, i) => `<tr class="${r.diff != null && r.diff < 0 ? 'late' : ''} ${r.pinned ? 'pinned' : ''}">
+                    <td><button class="pin-btn" onclick="togglePin('${r.id}')" title="訂住/解除">${r.pinned ? '📌' : '📍'}</button></td>
+                    <td>${i + 1}</td>
+                    <td>${esc(r.wo)}</td><td>${esc(r.mat)}</td><td>${esc(r.batch)}</td><td>${esc(r.model)}</td>
+                    <td>${esc(r.qty)}</td><td>${r.sec || ''}</td><td>${r.man}</td>
+                    <td>${Math.round(r.hours * 100) / 100}</td><td>${Math.round(r.cum * 10) / 10}</td>
+                    <td>${esc(r.start)}</td><td>${esc(r.end)}</td><td>${esc(r.due || '—')}</td>
+                    <td>${r.diff == null ? '' : `<span class="${r.diff < 0 ? 'diff-late' : 'diff-ok'}">${r.diff < 0 ? r.diff : '+' + r.diff}</span>`}</td>
+                    <td>${esc(r.note)}</td>
+                    <td><button class="row-act" onclick="editOrder('${r.id}')">改</button> <button class="row-act" onclick="removeOrder('${r.id}')">刪</button></td>
+                </tr>`).join('') + '</table></div>';
+            });
+            document.getElementById('result').innerHTML = html;
+        }
+
+        const OUT_COLS = ['產別','工單','物料','批次','車種','數量','工時(秒)','人力','所需工時(小時)','累計工時(小時)','開始時間','結束時間','達交日','差異天數','訂住','備註'];
+        function downloadResult() {
+            if (!lastResult.length) { alert('請先展算排程'); return; }
+            const aoa = [OUT_COLS];
+            lastResult.forEach(r => aoa.push([r.line, r.wo, r.mat, r.batch, r.model, r.qty, r.sec, r.man,
+                Math.round(r.hours*100)/100, Math.round(r.cum*10)/10, r.start, r.end, r.due, r.diff, r.pinned ? '是' : '', r.note]));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '遠期排程');
+            XLSX.writeFile(wb, `遠期排程展算_${todayStr()}.xlsx`);
+        }
+
+        initData();
+        runPlan();
+    </script>
+</body>
+</html>

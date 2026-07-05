@@ -166,6 +166,34 @@ function isWorkday(dateStr, cal) {
     return day >= 1 && day <= 5;
 }
 
+// 產能游標消耗：從 cursor { date, remain(當天剩餘工時) } 起，消耗 needHours 小時
+// 回傳 { start, end, cursor }；start=實際開工日、end=完工日、cursor=消耗後的新游標
+// 用於「一條產線依序佔用產能」，可跨日、可從當天剩餘時數接續
+function consumeHours(cursor, needHours, cal) {
+    let { date, remain } = cursor;
+    let need = Number(needHours) || 0;
+    let guard = 0;
+    // 先移動到有可用工時的日期
+    const ensureCapacity = () => {
+        let g = 0;
+        while (remain <= 0 && g++ < 3700) {
+            const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + 1); date = fmtDate(d);
+            remain = dayHours(date, cal);
+        }
+    };
+    ensureCapacity();
+    if (need <= 0) return { start: date, end: date, cursor: { date, remain } };
+    const start = date;
+    let last = date;
+    while (need > 1e-9 && guard++ < 5000) {
+        if (remain <= 0) { ensureCapacity(); }
+        const use = Math.min(remain, need);
+        remain -= use; need -= use; last = date;
+        if (need > 1e-9 && remain <= 1e-9) ensureCapacity();
+    }
+    return { start, end: last, cursor: { date, remain } };
+}
+
 // 從 fromStr（含當天）起，依行事曆逐日消耗可用工時，累計滿 needHours 的那一天即結束日
 // 回傳 { start, end }：start=第一個有工時可用的日期，end=工時累計達標的日期
 function scheduleByHours(fromStr, needHours, cal) {
