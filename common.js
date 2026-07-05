@@ -111,6 +111,20 @@ function readExcelFile(file, cb) {
     reader.readAsArrayBuffer(file);
 }
 
+// 讀取 Excel 第一個工作表 → 陣列的陣列（保留原始儲存格，含無標題資料）
+function readExcelFileAoa(file, cb) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            cb(null, XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }));
+        } catch (err) { cb(err); }
+    };
+    reader.onerror = () => cb(new Error('讀檔失敗'));
+    reader.readAsArrayBuffer(file);
+}
+
 // 下載匯入範本
 function downloadTemplate(filename, headers, example) {
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
@@ -119,14 +133,56 @@ function downloadTemplate(filename, headers, example) {
     XLSX.writeFile(wb, filename);
 }
 
-// ===== 行事曆工作日 =====
-// 預設週一～週五上班、週六日休息；overrides = { '2026-01-01': 'off' | 'on' }
-function isWorkday(dateStr, overrides) {
-    const ov = (overrides || {})[dateStr];
+// ===== 行事曆（小時制）=====
+// 新版行事曆 cal = { defaultWeekday: 7.8, days: { '2026-01-01': 小時數 } }
+// 舊版相容：overrides = { '2026-01-01': 'off' | 'on' }
+const DEFAULT_WEEKDAY_HOURS = 7.8;
+
+// 判斷是否為新版小時制行事曆物件
+function isHoursCal(cal) {
+    return cal && typeof cal === 'object' && ('days' in cal || 'defaultWeekday' in cal);
+}
+
+// 某一天的可用工時（小時）
+function dayHours(dateStr, cal) {
+    if (isHoursCal(cal)) {
+        const days = cal.days || {};
+        if (days[dateStr] !== undefined && days[dateStr] !== null && days[dateStr] !== '') return Number(days[dateStr]);
+        const dw = new Date(dateStr + 'T00:00:00').getDay();
+        if (dw === 0 || dw === 6) return 0; // 預設週六日休
+        return Number(cal.defaultWeekday != null ? cal.defaultWeekday : DEFAULT_WEEKDAY_HOURS);
+    }
+    // 舊版 on/off：上班日給預設工時、休息日 0
+    return isWorkday(dateStr, cal) ? DEFAULT_WEEKDAY_HOURS : 0;
+}
+
+// 預設週一～週五上班、週六日休息；支援新版(小時>0視為上班)與舊版 on/off
+function isWorkday(dateStr, cal) {
+    if (isHoursCal(cal)) return dayHours(dateStr, cal) > 0;
+    const ov = (cal || {})[dateStr];
     if (ov === 'on') return true;
     if (ov === 'off') return false;
     const day = new Date(dateStr + 'T00:00:00').getDay();
     return day >= 1 && day <= 5;
+}
+
+// 從 fromStr（含當天）起，依行事曆逐日消耗可用工時，累計滿 needHours 的那一天即結束日
+// 回傳 { start, end }：start=第一個有工時可用的日期，end=工時累計達標的日期
+function scheduleByHours(fromStr, needHours, cal) {
+    const d = new Date(fromStr + 'T00:00:00');
+    let remain = Number(needHours) || 0, guard = 0, start = null, last = fmtDate(d);
+    if (remain <= 0) return { start: fmtDate(d), end: fmtDate(d), spanDays: 0 };
+    while (remain > 0 && guard++ < 3700) {
+        const ds = fmtDate(d);
+        const h = dayHours(ds, cal);
+        if (h > 0) {
+            if (!start) start = ds;
+            remain -= h;
+            last = ds;
+        }
+        if (remain > 0) d.setDate(d.getDate() + 1);
+    }
+    return { start: start || fmtDate(d), end: last };
 }
 
 // 從 fromStr 起算 n 個日曆天後的日期（單純加天數，不跳假日）

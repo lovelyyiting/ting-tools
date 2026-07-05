@@ -198,7 +198,7 @@
         </div>
     </div>
 
-    <script src="common.js?v=20260705b"></script>
+    <script src="common.js?v=20260706a"></script>
     <script>
         let results = [];
         let filter = 'problem';
@@ -217,7 +217,7 @@
                 '<tr><td><div class="empty-hint">分析中…</div></td></tr>';
             const [orders, overrides, leadtime, incoming, bom, inventory] = await Promise.all([
                 fetchPath('toolbox/schedule/orders', {}),
-                fetchPath('toolbox/calendar/overrides', {}),
+                fetchPath('toolbox/calendar/hours', {}),
                 fetchPath('toolbox/materials/leadtime', { rows: [] }),
                 fetchPath('toolbox/materials/incoming', { rows: [] }),
                 fetchPath('toolbox/materials/bom', { rows: [] }),

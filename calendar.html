@@ -3,283 +3,314 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>年度行事曆維護</title>
+    <title>年度行事曆維護（小時制）</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 10px;
+            min-height: 100vh; padding: 10px;
         }
-
         .container {
-            max-width: 1100px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            overflow: hidden;
+            max-width: 1150px; margin: 0 auto; background: white;
+            border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;
         }
-
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            text-align: center;
-            position: relative;
+            color: white; padding: 20px; text-align: center; position: relative;
         }
-
-        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
         .header p { font-size: 13px; opacity: 0.9; }
-
         .back-link {
-            position: absolute;
-            left: 14px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: white;
-            text-decoration: none;
-            font-size: 14px;
-            background: rgba(255,255,255,0.2);
-            padding: 6px 12px;
-            border-radius: 16px;
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: white; text-decoration: none; font-size: 14px;
+            background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px;
         }
-
         .toolbar {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            padding: 16px 20px;
-            border-bottom: 1px solid #eee;
-            align-items: center;
-            justify-content: center;
+            display: flex; flex-wrap: wrap; gap: 12px; padding: 14px 20px;
+            border-bottom: 1px solid #eee; align-items: center; justify-content: center;
         }
-
-        .year-nav {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
+        .year-nav { display: flex; align-items: center; gap: 10px; }
         .year-nav button {
-            border: 1px solid #ccc;
-            background: white;
-            border-radius: 8px;
-            padding: 6px 14px;
-            font-size: 15px;
-            cursor: pointer;
+            border: 1px solid #ccc; background: white; border-radius: 8px;
+            padding: 6px 12px; font-size: 15px; cursor: pointer;
         }
-
-        .year-nav .year {
-            font-size: 22px;
-            font-weight: bold;
-            color: #333;
-            min-width: 90px;
-            text-align: center;
+        .year-nav .year { font-size: 20px; font-weight: bold; color: #333; min-width: 84px; text-align: center; }
+        .ctrl { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #555; }
+        .ctrl input[type=number] {
+            width: 64px; padding: 6px 8px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px;
         }
-
-        .legend {
-            display: flex;
-            gap: 14px;
-            font-size: 13px;
-            color: #555;
-            align-items: center;
+        .btn-sub {
+            border: 1px solid #ccc; background: white; padding: 7px 13px;
+            border-radius: 8px; font-size: 13px; cursor: pointer; color: #555;
         }
-
-        .dot {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 3px;
-            margin-right: 4px;
-            vertical-align: -1px;
-        }
-
+        .legend { display: flex; gap: 12px; font-size: 12px; color: #666; align-items: center; flex-wrap: wrap; }
+        .dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 3px; vertical-align: -1px; }
         .dot.work { background: #e8f0fe; border: 1px solid #a9c3f5; }
         .dot.off { background: #ffd6d6; border: 1px solid #f0a0a0; }
-
-        .stats {
-            text-align: center;
-            font-size: 14px;
-            color: #555;
-            padding: 10px;
-        }
-
-        .months {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-            gap: 16px;
-            padding: 10px 20px 30px;
-        }
-
-        .month {
-            border: 1px solid #eee;
-            border-radius: 10px;
-            padding: 10px;
-        }
-
-        .month h3 {
-            text-align: center;
-            font-size: 15px;
-            color: #444;
-            margin-bottom: 6px;
-        }
-
-        .month table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-        }
-
-        .month th {
-            font-size: 11px;
-            color: #999;
-            font-weight: normal;
-            padding: 2px 0;
-        }
-
-        .month td {
-            text-align: center;
-            font-size: 13px;
-            padding: 0;
-        }
-
+        .dot.ot { background: #ffe8c2; border: 1px solid #f0c070; }
+        .stats { text-align: center; font-size: 14px; color: #555; padding: 10px; }
+        .months { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 16px; padding: 6px 20px 30px; }
+        .month { border: 1px solid #eee; border-radius: 10px; padding: 10px; }
+        .month h3 { text-align: center; font-size: 15px; color: #444; margin-bottom: 6px; }
+        .month table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .month th { font-size: 11px; color: #999; font-weight: normal; padding: 2px 0; }
+        .month td { text-align: center; padding: 1px; }
         .day {
-            display: block;
-            width: 100%;
-            padding: 5px 0;
-            border-radius: 6px;
-            cursor: pointer;
-            border: 1px solid transparent;
-            background: #e8f0fe;
-            color: #333;
-            margin: 1px 0;
+            display: block; width: 100%; padding: 3px 0; border-radius: 6px; cursor: pointer;
+            border: 1px solid transparent; background: #e8f0fe; color: #333; line-height: 1.15;
         }
+        .day .d { font-size: 12px; }
+        .day .h { font-size: 10px; color: #555; }
+        .day.off { background: #ffd6d6; color: #a33; }
+        .day.off .h { color: #a33; }
+        .day.ot { background: #ffe8c2; }
+        .day.today { border-color: #667eea; font-weight: bold; }
+        .day:hover { filter: brightness(0.93); }
+        .hint { text-align: center; font-size: 12px; color: #999; padding: 0 20px 20px; line-height: 1.6; }
 
-        .day.off {
-            background: #ffd6d6;
-            color: #a33;
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+        .modal.show { display: flex; }
+        .modal-box { background: white; border-radius: 12px; padding: 22px; width: 100%; max-width: 360px; }
+        .modal-box h3 { margin-bottom: 6px; color: #333; font-size: 18px; }
+        .modal-box .sub { font-size: 13px; color: #888; margin-bottom: 16px; }
+        .quick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .quick button {
+            flex: 1 1 45%; padding: 10px; border: 1px solid #ccc; background: #f7f8fc;
+            border-radius: 8px; font-size: 14px; cursor: pointer;
         }
-
-        .day.today {
-            border-color: #667eea;
-            font-weight: bold;
-        }
-
-        .day:hover { filter: brightness(0.92); }
-
-        .hint {
-            text-align: center;
-            font-size: 13px;
-            color: #999;
-            padding: 0 20px 20px;
-        }
+        .quick button:hover { background: #eef; }
+        .custom-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+        .custom-row input { flex: 1; padding: 9px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; }
+        .modal-actions { display: flex; gap: 10px; }
+        .modal-actions button { flex: 1; padding: 11px; border-radius: 8px; border: none; font-size: 15px; cursor: pointer; }
+        .save-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .cancel-btn { background: #eee; color: #555; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <a class="back-link" href="index.html">← 首頁</a>
-            <h1>📆 年度行事曆維護</h1>
-            <p>點一下日期即可切換「上班／休息」・休息日不列入交期與排程計算</p>
+            <h1>🕘 年度行事曆（小時制）</h1>
+            <p>每天維護「可用工時」・排程用它計算開始/結束時間・點日期即可調整</p>
         </div>
 
         <div class="toolbar">
             <div class="year-nav">
-                <button onclick="changeYear(-1)">◀ 前一年</button>
+                <button onclick="changeYear(-1)">◀</button>
                 <div class="year" id="yearLabel"></div>
-                <button onclick="changeYear(1)">後一年 ▶</button>
+                <button onclick="changeYear(1)">▶</button>
             </div>
+            <div class="ctrl">
+                平日預設工時
+                <input type="number" id="defHours" step="0.1" min="0" max="24" onchange="setDefault()">
+                小時
+            </div>
+            <button class="btn-sub" onclick="document.getElementById('calFile').click()">📥 匯入 Excel</button>
+            <button class="btn-sub" onclick="downloadCalTpl()">⬇️ 範本</button>
+            <input type="file" id="calFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="importCal(this.files[0]); this.value='';">
             <div class="legend">
-                <span><span class="dot work"></span>上班日</span>
-                <span><span class="dot off"></span>休息日</span>
-                <span>（預設週六日休息）</span>
+                <span><span class="dot work"></span>平日</span>
+                <span><span class="dot ot"></span>加班/特別</span>
+                <span><span class="dot off"></span>休息(0)</span>
             </div>
         </div>
 
         <div class="stats" id="stats"></div>
         <div class="months" id="months"></div>
-        <div class="hint">修改會立即同步到所有裝置。休息日會被「基本交期天數」的推算自動跳過。</div>
+        <div class="hint">每格上方是日期、下方是可用工時（小時）。點日期可設定當天工時，0＝休息。修改即時同步到所有裝置，排程工具會用這裡的每日工時計算。</div>
     </div>
 
-    <script src="common.js?v=20260705b"></script>
+    <div class="modal" id="dayModal">
+        <div class="modal-box">
+            <h3 id="modalDate"></h3>
+            <div class="sub" id="modalSub"></div>
+            <div class="quick">
+                <button onclick="pick(0)">😴 休息 0</button>
+                <button onclick="pick(3.9)">🌤 半天 3.9</button>
+                <button onclick="pickDefault()">🏭 正常班</button>
+                <button onclick="pick(10.8)">🌙 加班 10.8</button>
+            </div>
+            <div class="custom-row">
+                <span>自訂：</span>
+                <input type="number" id="customHours" step="0.1" min="0" max="24" placeholder="小時">
+                <span>小時</span>
+            </div>
+            <div class="modal-actions">
+                <button class="save-btn" onclick="saveCustom()">儲存</button>
+                <button class="cancel-btn" onclick="closeModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706a"></script>
     <script>
-        const OV_PATH = 'toolbox/calendar/overrides';
-        let overrides = {};
+        const CAL_PATH = 'toolbox/calendar/hours';
+        let cal = { defaultWeekday: DEFAULT_WEEKDAY_HOURS, days: {} };
         let year = new Date().getFullYear();
+        let editingDate = null;
 
         function initData() {
-            overrides = JSON.parse(localStorage.getItem('calOverrides') || '{}');
+            const cached = JSON.parse(localStorage.getItem('calHours') || 'null');
+            if (cached) cal = normalize(cached);
+            document.getElementById('defHours').value = cal.defaultWeekday;
             render();
             if (db) {
-                db.ref(OV_PATH).on('value', snap => {
-                    overrides = snap.val() || {};
-                    localStorage.setItem('calOverrides', JSON.stringify(overrides));
-                    render();
+                db.ref(CAL_PATH).on('value', snap => {
+                    const v = snap.val();
+                    if (v) { cal = normalize(v); document.getElementById('defHours').value = cal.defaultWeekday; render(); }
                 });
             }
         }
-
-        function changeYear(delta) {
-            year += delta;
+        function normalize(v) {
+            return { defaultWeekday: v.defaultWeekday != null ? Number(v.defaultWeekday) : DEFAULT_WEEKDAY_HOURS, days: v.days || {} };
+        }
+        function persist() {
+            localStorage.setItem('calHours', JSON.stringify(cal));
+            if (db) db.ref(CAL_PATH).set(cal);
             render();
         }
 
-        function toggleDay(dateStr) {
-            const nowWork = isWorkday(dateStr, overrides);
-            const day = new Date(dateStr + 'T00:00:00').getDay();
-            const defaultWork = day >= 1 && day <= 5;
-            const target = nowWork ? 'off' : 'on';
-            // 若切回預設狀態就直接移除覆蓋設定，保持資料乾淨
-            const backToDefault = (target === 'on' && defaultWork) || (target === 'off' && !defaultWork);
-            if (backToDefault) {
-                delete overrides[dateStr];
-                if (db) db.ref(OV_PATH + '/' + dateStr).remove();
-            } else {
-                overrides[dateStr] = target;
-                if (db) db.ref(OV_PATH + '/' + dateStr).set(target);
-            }
-            localStorage.setItem('calOverrides', JSON.stringify(overrides));
-            render();
+        function changeYear(delta) { year += delta; render(); }
+
+        function setDefault() {
+            const v = Number(document.getElementById('defHours').value);
+            cal.defaultWeekday = isNaN(v) ? DEFAULT_WEEKDAY_HOURS : v;
+            persist();
+        }
+
+        function openModal(dateStr) {
+            editingDate = dateStr;
+            const d = new Date(dateStr + 'T00:00:00');
+            const wk = ['日','一','二','三','四','五','六'][d.getDay()];
+            document.getElementById('modalDate').textContent = dateStr + '（週' + wk + '）';
+            const h = dayHours(dateStr, cal);
+            const isDef = cal.days[dateStr] === undefined;
+            document.getElementById('modalSub').textContent = `目前：${h} 小時` + (isDef ? '（預設）' : '（已自訂）');
+            document.getElementById('customHours').value = h;
+            document.getElementById('dayModal').classList.add('show');
+        }
+        function closeModal() { document.getElementById('dayModal').classList.remove('show'); editingDate = null; }
+
+        function pick(hours) { setDay(editingDate, hours); }
+        function pickDefault() {
+            // 設回「跟隨平日預設」= 移除自訂
+            if (editingDate) { delete cal.days[editingDate]; if (db) db.ref(CAL_PATH + '/days/' + editingDate).remove(); persist(); }
+            closeModal();
+        }
+        function saveCustom() {
+            const v = Number(document.getElementById('customHours').value);
+            if (isNaN(v) || v < 0) { alert('請輸入 0 以上的小時數'); return; }
+            setDay(editingDate, v);
+        }
+        function setDay(dateStr, hours) {
+            if (!dateStr) return;
+            cal.days[dateStr] = hours;
+            closeModal();
+            persist();
+        }
+
+        function downloadCalTpl() {
+            downloadTemplate('行事曆工時_匯入範本.xlsx', ['日期', '可用工時'], ['2026-06-01', 7.8]);
+        }
+
+        // 匯入：自動找出「日期欄」與「工時欄」（容錯無標題的日期分頁）
+        function importCal(file) {
+            if (!file) return;
+            readExcelFileAoa(file, (err, aoa) => {
+                if (err) { alert('讀取失敗：' + err.message); return; }
+                if (!aoa.length) { alert('檔案沒有資料'); return; }
+                // 先看有沒有標題列
+                let headerRow = -1, dateCol = -1, hourCol = -1;
+                for (let i = 0; i < Math.min(aoa.length, 5); i++) {
+                    const cells = aoa[i].map(x => String(x).trim());
+                    const dc = cells.findIndex(c => ['日期','date','Date','排程日'].includes(c));
+                    const hc = cells.findIndex(c => ['可用工時','工時','時數','小時','hours'].includes(c));
+                    if (dc >= 0 && hc >= 0) { headerRow = i; dateCol = dc; hourCol = hc; break; }
+                }
+                let rows = [];
+                if (headerRow >= 0) {
+                    for (let i = headerRow + 1; i < aoa.length; i++) {
+                        const ds = parseDateCell(aoa[i][dateCol]);
+                        const h = Number(aoa[i][hourCol]);
+                        if (ds && !isNaN(h)) rows.push([ds, h]);
+                    }
+                } else {
+                    // 無標題：自動判斷哪一欄是日期序號(40000~60000)、哪一欄是工時(0~24)
+                    const ncol = Math.max(...aoa.map(r => r.length));
+                    let bestDate = -1, bestHour = -1, dScore = 0, hScore = 0;
+                    for (let c = 0; c < ncol; c++) {
+                        let dCnt = 0, hCnt = 0, tot = 0;
+                        for (let i = 0; i < aoa.length; i++) {
+                            const v = aoa[i][c]; if (v === '' || v == null) continue; tot++;
+                            const n = Number(v);
+                            if (!isNaN(n) && n > 40000 && n < 60000) dCnt++;
+                            if (!isNaN(n) && n >= 0 && n <= 24) hCnt++;
+                        }
+                        if (tot > 0 && dCnt / tot > 0.6 && dCnt > dScore) { dScore = dCnt; bestDate = c; }
+                    }
+                    for (let c = 0; c < ncol; c++) {
+                        if (c === bestDate) continue;
+                        let hCnt = 0, tot = 0;
+                        for (let i = 0; i < aoa.length; i++) {
+                            const v = aoa[i][c]; if (v === '' || v == null) continue; tot++;
+                            const n = Number(v);
+                            if (!isNaN(n) && n >= 0 && n <= 24) hCnt++;
+                        }
+                        if (tot > 0 && hCnt / tot > 0.6 && hCnt > hScore) { hScore = hCnt; bestHour = c; }
+                    }
+                    if (bestDate < 0 || bestHour < 0) { alert('無法自動辨識日期欄與工時欄。\n請改用「範本」格式（日期、可用工時），或確認資料。'); return; }
+                    for (let i = 0; i < aoa.length; i++) {
+                        const ds = parseDateCell(aoa[i][bestDate]);
+                        const h = Number(aoa[i][bestHour]);
+                        if (ds && !isNaN(h)) rows.push([ds, h]);
+                    }
+                }
+                if (!rows.length) { alert('找不到可匯入的日期/工時資料'); return; }
+                if (!confirm(`將匯入 ${rows.length} 天的工時設定（會覆蓋這些日期的現有設定），確定？`)) return;
+                rows.forEach(([ds, h]) => { cal.days[ds] = h; });
+                persist();
+                alert(`已匯入 ${rows.length} 天的工時設定`);
+            });
         }
 
         function render() {
             document.getElementById('yearLabel').textContent = year + ' 年';
             const today = todayStr();
-            const container = document.getElementById('months');
-            let workdays = 0;
+            let totalHours = 0, workdays = 0;
             let html = '';
             for (let m = 0; m < 12; m++) {
                 const first = new Date(year, m, 1);
                 const daysInMonth = new Date(year, m + 1, 0).getDate();
-                let cells = '';
                 let dow = first.getDay();
                 let rows = '<tr>' + '<td></td>'.repeat(dow);
+                let monthHours = 0;
                 for (let d = 1; d <= daysInMonth; d++) {
                     const ds = year + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
-                    const work = isWorkday(ds, overrides);
-                    if (work) workdays++;
-                    rows += `<td><span class="day ${work ? '' : 'off'} ${ds === today ? 'today' : ''}" onclick="toggleDay('${ds}')">${d}</span></td>`;
+                    const h = dayHours(ds, cal);
+                    const isDef = cal.days[ds] === undefined;
+                    const dwk = new Date(ds + 'T00:00:00').getDay();
+                    const normalWeekday = dwk >= 1 && dwk <= 5;
+                    let cls = '';
+                    if (h <= 0) cls = 'off';
+                    else if (!isDef && (h !== cal.defaultWeekday || !normalWeekday)) cls = 'ot';
+                    if (h > 0) { totalHours += h; workdays++; monthHours += h; }
+                    rows += `<td><span class="day ${cls} ${ds === today ? 'today' : ''}" onclick="openModal('${ds}')"><span class="d">${d}</span><span class="h">${h > 0 ? h : '休'}</span></span></td>`;
                     dow = (dow + 1) % 7;
                     if (dow === 0 && d < daysInMonth) rows += '</tr><tr>';
                 }
                 if (dow !== 0) rows += '<td></td>'.repeat(7 - dow);
                 rows += '</tr>';
-                html += `
-                <div class="month">
-                    <h3>${m+1} 月</h3>
-                    <table>
-                        <tr><th>日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th></tr>
-                        ${rows}
-                    </table>
-                </div>`;
+                html += `<div class="month"><h3>${m+1} 月・${Math.round(monthHours*10)/10} 小時</h3>
+                    <table><tr><th>日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th></tr>${rows}</table></div>`;
             }
-            container.innerHTML = html;
-            document.getElementById('stats').textContent = `${year} 年共 ${workdays} 個上班日`;
+            document.getElementById('months').innerHTML = html;
+            document.getElementById('stats').textContent =
+                `${year} 年：可用工時合計 ${Math.round(totalHours*10)/10} 小時・上班 ${workdays} 天（平日預設 ${cal.defaultWeekday} 小時）`;
         }
 
         initData();
