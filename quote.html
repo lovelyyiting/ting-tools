@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交期評估工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+
+        .back-link {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            background: rgba(255,255,255,0.2);
+            padding: 6px 12px;
+            border-radius: 16px;
+        }
+
+        .body { padding: 20px; }
+
+        .section {
+            border: 1px solid #eee;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .section h3 {
+            font-size: 15px;
+            color: #444;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .field label {
+            display: block;
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 4px;
+        }
+
+        .field input {
+            width: 100%;
+            padding: 9px 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 15px;
+            font-family: inherit;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 140px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'SF Mono', Menlo, monospace;
+            resize: vertical;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 26px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .btn-sub {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #555;
+        }
+
+        .table-tbl-meta { font-size: 12px; color: #888; margin-left: auto; }
+
+        .result-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .rcard {
+            background: #f5f6fa;
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .rcard .label { font-size: 13px; color: #777; margin-bottom: 6px; }
+        .rcard .value { font-size: 20px; font-weight: bold; color: #333; }
+
+        .verdict {
+            text-align: center;
+            padding: 16px;
+            border-radius: 10px;
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 14px;
+        }
+
+        .verdict.ok { background: #d4edda; color: #155724; }
+        .verdict.no { background: #f8d7da; color: #721c24; }
+
+        table.detail {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        table.detail th {
+            background: #f5f6fa;
+            padding: 8px;
+            text-align: left;
+            color: #555;
+        }
+
+        table.detail td {
+            padding: 7px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        tr.notfound td { background: #fff5f5; color: #a33; }
+        tr.maxrow td { background: #fff8e6; font-weight: bold; }
+
+        .hidden { display: none; }
+
+        .note { font-size: 12px; color: #999; margin-top: 8px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📈 交期評估工具</h1>
+            <p>輸入 BOM 料號，依交期表評估最快可出貨時間、能否滿足目標交期</p>
+        </div>
+
+        <div class="body">
+            <!-- 參數 -->
+            <div class="section">
+                <h3>① 參數輸入</h3>
+                <div class="param-grid">
+                    <div class="field">
+                        <label>下單日期</label>
+                        <input type="date" id="orderDate">
+                    </div>
+                    <div class="field">
+                        <label>目標交期</label>
+                        <input type="date" id="targetDate">
+                    </div>
+                    <div class="field">
+                        <label>排程緩衝（天）</label>
+                        <input type="number" id="bufSchedule" value="5">
+                    </div>
+                    <div class="field">
+                        <label>出貨緩衝（天）</label>
+                        <input type="number" id="bufShip" value="11">
+                    </div>
+                </div>
+                <div class="note">排程時間＝下單日期＋最長交期＋排程緩衝；可出貨時間＝下單日期＋最長交期＋出貨緩衝（預設 5／11，與原 Excel 一致，可自行調整）。</div>
+            </div>
+
+            <!-- BOM 料號 -->
+            <div class="section">
+                <h3>② BOM 料號清單 <span style="font-weight:normal;color:#999;font-size:13px">（一行一個料號，可直接從 Excel 貼上）</span></h3>
+                <textarea id="bomInput" placeholder="2110-CP041A-044&#10;2110-CP041A-048&#10;2110-CP041A-050"></textarea>
+                <div style="margin-top:12px;text-align:center">
+                    <button class="btn" onclick="evaluate()">🔍 開始評估</button>
+                </div>
+            </div>
+
+            <!-- 結果 -->
+            <div class="section hidden" id="resultSection">
+                <h3>③ 評估結果</h3>
+                <div class="verdict" id="verdict"></div>
+                <div class="result-cards" id="resultCards"></div>
+                <table class="detail" id="detailTable"></table>
+            </div>
+
+            <!-- 交期表維護 -->
+            <div class="section">
+                <h3>📋 交期表維護
+                    <button class="btn-sub" onclick="document.getElementById('ltFile').click()">📥 匯入 Excel（覆蓋）</button>
+                    <button class="btn-sub" onclick="downloadLtTpl()">⬇️ 範本</button>
+                    <span class="table-tbl-meta" id="ltMeta"></span>
+                </h3>
+                <input type="file" id="ltFile" accept=".xlsx,.xls,.csv" class="hidden" onchange="importLt(this.files[0]); this.value='';">
+                <input type="text" id="ltSearch" placeholder="🔍 查詢單一料號的交期" style="width:100%;padding:9px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px" oninput="searchLt()">
+                <div id="ltSearchResult" class="note"></div>
+                <div class="note">交期表每天會變動，直接匯入最新 Excel 即整批覆蓋。欄位需含「物料／料號」與「計劃交貨時間／交期(天)」。</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        const LT_PATH = 'toolbox/quote/leadtimes';
+        let ltData = { updatedAt: '', rows: [] };
+        let ltMap = {};
+
+        function buildMap() {
+            ltMap = {};
+            (ltData.rows || []).forEach(r => { ltMap[String(r.mat).trim()] = num(r.days); });
+        }
+
+        function initData() {
+            const cached = JSON.parse(localStorage.getItem('quoteLt') || 'null');
+            if (cached) { ltData = cached; buildMap(); }
+            renderLtMeta();
+            if (db) {
+                db.ref(LT_PATH).on('value', snap => {
+                    ltData = snap.val() || { updatedAt: '', rows: [] };
+                    if (!Array.isArray(ltData.rows)) ltData.rows = Object.values(ltData.rows || {});
+                    localStorage.setItem('quoteLt', JSON.stringify(ltData));
+                    buildMap();
+                    renderLtMeta();
+                });
+            }
+            // 預設下單日期為今天
+            document.getElementById('orderDate').value = todayStr();
+        }
+
+        function renderLtMeta() {
+            document.getElementById('ltMeta').textContent =
+                `共 ${(ltData.rows || []).length} 筆料號` + (ltData.updatedAt ? `・更新於 ${ltData.updatedAt}` : '・尚未匯入');
+        }
+
+        function importLt(file) {
+            if (!file) return;
+            readExcelFile(file, (err, rows) => {
+                if (err) { alert('讀取 Excel 失敗：' + err.message); return; }
+                if (!rows.length) { alert('檔案裡沒有資料'); return; }
+                const map = buildHeaderMap(rows[0]);
+                const parsed = rows.map(r => ({
+                    mat: String(cell(r, map, 'mat')).trim(),
+                    days: num(cell(r, map, 'ltDays'))
+                })).filter(r => r.mat);
+                if (!parsed.length) {
+                    alert('找不到可匯入的資料。\n請確認標題列包含「物料／料號」與「計劃交貨時間／交期(天)」\n（可按「⬇️ 範本」下載格式）');
+                    return;
+                }
+                if (!confirm(`即將以 ${parsed.length} 筆【整批覆蓋】現有交期表，確定匯入？`)) return;
+                ltData = { updatedAt: new Date().toLocaleString('zh-TW'), rows: parsed };
+                localStorage.setItem('quoteLt', JSON.stringify(ltData));
+                buildMap();
+                renderLtMeta();
+                if (db) db.ref(LT_PATH).set(ltData);
+                alert(`交期表已更新：${parsed.length} 筆`);
+            });
+        }
+
+        function downloadLtTpl() {
+            downloadTemplate('交期表_匯入範本.xlsx', ['物料', '計劃交貨時間'], ['2110-CP041A-044', 48]);
+        }
+
+        function searchLt() {
+            const kw = document.getElementById('ltSearch').value.trim();
+            const box = document.getElementById('ltSearchResult');
+            if (!kw) { box.textContent = ''; return; }
+            if (ltMap[kw] !== undefined) {
+                box.innerHTML = `✅ <b>${esc(kw)}</b> 的交期為 <b>${ltMap[kw]}</b> 天`;
+            } else {
+                const hit = (ltData.rows || []).filter(r => r.mat.includes(kw)).slice(0, 5);
+                box.innerHTML = hit.length
+                    ? '找到近似：' + hit.map(r => `${esc(r.mat)}（${r.days}天）`).join('、')
+                    : `❌ 交期表查無「${esc(kw)}」`;
+            }
+        }
+
+        function evaluate() {
+            const orderDate = document.getElementById('orderDate').value;
+            const targetDate = document.getElementById('targetDate').value;
+            const bufS = num(document.getElementById('bufSchedule').value);
+            const bufP = num(document.getElementById('bufShip').value);
+            if (!orderDate) { alert('請選擇下單日期'); return; }
+            const parts = document.getElementById('bomInput').value
+                .split(/[\n,;\t]/).map(s => s.trim()).filter(Boolean);
+            if (!parts.length) { alert('請至少輸入一個料號'); return; }
+            if (!ltData.rows || !ltData.rows.length) { alert('交期表尚無資料，請先在下方「交期表維護」匯入 Excel'); return; }
+
+            const detail = parts.map(p => {
+                const found = ltMap[p] !== undefined;
+                return { mat: p, days: found ? ltMap[p] : null, found };
+            });
+            const validDays = detail.filter(d => d.found).map(d => d.days);
+            const maxDays = validDays.length ? Math.max(...validDays) : 0;
+            const schedule = addDays(orderDate, maxDays + bufS);
+            const shipDate = addDays(orderDate, maxDays + bufP);
+            const satisfy = targetDate ? shipDate <= targetDate : null;
+            const notFound = detail.filter(d => !d.found).length;
+
+            // 結果卡片
+            document.getElementById('resultCards').innerHTML = `
+                <div class="rcard"><div class="label">最長交期</div><div class="value">${maxDays} 天</div></div>
+                <div class="rcard"><div class="label">排程時間</div><div class="value">${schedule}</div></div>
+                <div class="rcard"><div class="label">可出貨時間</div><div class="value">${shipDate}</div></div>
+                <div class="rcard"><div class="label">目標交期</div><div class="value">${targetDate || '未設定'}</div></div>`;
+
+            const verdict = document.getElementById('verdict');
+            if (satisfy === null) {
+                verdict.className = 'verdict';
+                verdict.style.background = '#e9ecef'; verdict.style.color = '#555';
+                verdict.textContent = 'ℹ️ 未填目標交期，僅估算可出貨時間 ' + shipDate;
+            } else if (satisfy) {
+                verdict.className = 'verdict ok'; verdict.style.background=''; verdict.style.color='';
+                verdict.textContent = '✅ 可接單（可出貨 ' + shipDate + '，不晚於目標 ' + targetDate + '）';
+            } else {
+                verdict.className = 'verdict no'; verdict.style.background=''; verdict.style.color='';
+                verdict.textContent = '❌ 不滿足（可出貨 ' + shipDate + '，晚於目標 ' + targetDate + '）';
+            }
+
+            document.getElementById('detailTable').innerHTML =
+                `<tr><th>#</th><th>料號</th><th>交期(天)</th></tr>` +
+                detail.map((d, i) => `
+                <tr class="${!d.found ? 'notfound' : (d.found && d.days === maxDays && maxDays > 0 ? 'maxrow' : '')}">
+                    <td>${i + 1}</td>
+                    <td>${esc(d.mat)}</td>
+                    <td>${d.found ? d.days + (d.days === maxDays && maxDays > 0 ? ' ← 最長' : '') : '⚠️ 找不到'}</td>
+                </tr>`).join('') +
+                (notFound ? `<tr><td colspan="3" style="color:#a33">⚠️ 有 ${notFound} 個料號不在交期表中，未列入最長交期計算，請確認料號或更新交期表</td></tr>` : '');
+
+            document.getElementById('resultSection').classList.remove('hidden');
+            document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        initData();
+    </script>
+</body>
+</html>

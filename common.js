@@ -69,7 +69,7 @@ const COL_ALIASES = {
     mat:      ['料號','物料','品號','物料編號','料件編號','Material','material'],
     name:     ['品名','品名規格','名稱','品名/規格','Description'],
     qty:      ['數量','需求數量','在途數量','Qty','QTY','qty'],
-    ltDays:   ['基本交期','基本交期(天)','交期天數','交期(天)','採購前置時間','前置時間','L/T','LT'],
+    ltDays:   ['基本交期','基本交期(天)','交期天數','交期(天)','計劃交貨時間','計畫交貨時間','計劃交期','交貨時間','採購前置時間','前置時間','L/T','LT'],
     dueDate:  ['交期','交貨日','到貨日','預交日','交期日期','預計到貨日'],
     orderNo:  ['工單號','工單','製令','製令單號','單號'],
     parent:   ['成品料號','主件料號','母件料號','父階料號','父階'],
@@ -127,6 +127,13 @@ function isWorkday(dateStr, overrides) {
     if (ov === 'off') return false;
     const day = new Date(dateStr + 'T00:00:00').getDay();
     return day >= 1 && day <= 5;
+}
+
+// 從 fromStr 起算 n 個日曆天後的日期（單純加天數，不跳假日）
+function addDays(fromStr, n) {
+    const d = new Date(fromStr + 'T00:00:00');
+    d.setDate(d.getDate() + Number(n || 0));
+    return fmtDate(d);
 }
 
 // 從 fromStr 起算 n 個工作天後的日期（跳過休假日）
