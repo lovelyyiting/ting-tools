@@ -248,21 +248,6 @@
                     })).filter(r => r.mat && r.qty > 0);
                 }
             },
-            bom: {
-                title: 'BOM',
-                path: 'toolbox/materials/bom',
-                headers: ['成品料號', '子件料號', '用量'],
-                example: ['FG-1000', 'RM-0001', 2],
-                cols: [['parent','成品料號'], ['child','子件料號'], ['usage','用量']],
-                note: '每個成品由哪些子件組成、每單位用量多少。缺料分析會依排程工單的成品料號展開。',
-                parse(rows, map) {
-                    return rows.map(r => ({
-                        parent: String(cell(r, map, 'parent')).trim(),
-                        child: String(cell(r, map, 'child')).trim(),
-                        usage: num(cell(r, map, 'usage'))
-                    })).filter(r => r.parent && r.child && r.usage > 0);
-                }
-            },
             inventory: {
                 title: '庫存',
                 path: 'toolbox/materials/inventory',
