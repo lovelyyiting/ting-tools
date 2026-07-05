@@ -158,6 +158,17 @@
             margin-top: 10px;
             line-height: 1.6;
         }
+        /* 車種BOM 分頁 */
+        .bom-layout { display: flex; min-height: 55vh; border: 1px solid #eee; border-radius: 8px; overflow: hidden; }
+        .bom-sidebar { width: 200px; border-right: 1px solid #eee; overflow-y: auto; max-height: 62vh; flex-shrink: 0; }
+        .bom-model { padding: 10px 14px; border-bottom: 1px solid #f2f2f2; cursor: pointer; font-size: 14px; }
+        .bom-model:hover { background: #f7f8fc; }
+        .bom-model.active { background: #eef2ff; border-left: 4px solid #667eea; font-weight: bold; }
+        .bom-model .cnt { font-size: 12px; color: #999; }
+        .bom-content { flex: 1; padding: 12px 14px; overflow-x: auto; }
+        .bom-head { font-size: 16px; font-weight: bold; color: #445; }
+        .bom-sub { font-size: 13px; color: #888; margin-bottom: 10px; }
+        .lv { display: inline-block; min-width: 20px; text-align: center; background: #eef; border-radius: 4px; padding: 1px 5px; font-size: 12px; color: #558; }
     </style>
 </head>
 <body>
@@ -165,12 +176,12 @@
         <div class="header">
             <a class="back-link" href="index.html">← 首頁</a>
             <h1>📦 物料資料管理</h1>
-            <p>基本交期・在途交期・BOM・庫存，每天用 Excel 一鍵更新</p>
+            <p>基本交期・在途交期・BOM・庫存・車種BOM，每天用 Excel 一鍵更新</p>
         </div>
 
         <div class="tabs" id="tabs"></div>
 
-        <div class="panel">
+        <div class="panel" id="stdPanel">
             <div class="actions">
                 <button class="import-btn" onclick="document.getElementById('fileInput').click()">📥 匯入 Excel（整批覆蓋）</button>
                 <button class="tpl-btn" onclick="downloadTpl()">⬇️ 下載範本</button>
@@ -183,6 +194,22 @@
                 <table class="data" id="dataTable"></table>
             </div>
             <div class="note" id="note"></div>
+        </div>
+
+        <!-- 車種BOM 分頁 -->
+        <div class="panel" id="bomPanel" style="display:none">
+            <div class="actions">
+                <button class="import-btn" onclick="document.getElementById('bomFile').click()">📥 匯入車種BOM（整批覆蓋）</button>
+                <button class="tpl-btn" onclick="bomTplInfo()">⬇️ 格式說明</button>
+                <button class="clear-btn" onclick="clearBom()">🗑️ 清空</button>
+                <span class="meta" id="bomMeta"></span>
+            </div>
+            <input type="file" id="bomFile" accept=".xlsx,.xls" style="display:none" onchange="importBom(this.files[0]); this.value='';">
+            <div class="bom-layout">
+                <div class="bom-sidebar" id="bomSidebar"></div>
+                <div class="bom-content" id="bomContent"><div class="empty-hint">尚無車種BOM，點「📥 匯入車種BOM」</div></div>
+            </div>
+            <div class="note">匯入格式：一份 Excel，含一張「彙整表」分頁（車種、料號）＋每個車種各一張分頁（分頁名＝車種），車種分頁含 層次／物件 ID（料號）／物件說明／元件數量／單位／物料類型。可直接匯入 SAP 匯出的「各車種BOM」檔。</div>
         </div>
     </div>
 
@@ -259,12 +286,16 @@
         function initTabs() {
             document.getElementById('tabs').innerHTML = Object.entries(DATASETS).map(([k, d]) =>
                 `<div class="tab ${k === currentKey ? 'active' : ''}" data-key="${k}" onclick="switchTab('${k}')">${d.title}</div>`
-            ).join('');
+            ).join('') + `<div class="tab" data-key="bommodel" onclick="switchTab('bommodel')">車種BOM</div>`;
         }
 
         function switchTab(k) {
-            currentKey = k;
             document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.key === k));
+            const isBom = k === 'bommodel';
+            document.getElementById('stdPanel').style.display = isBom ? 'none' : '';
+            document.getElementById('bomPanel').style.display = isBom ? '' : 'none';
+            if (isBom) { renderBom(); return; }
+            currentKey = k;
             document.getElementById('searchBox').value = '';
             renderTable();
         }
@@ -346,8 +377,128 @@
                 (rows.length > 300 ? `<tr><td colspan="${d.cols.length}" style="color:#999">…其餘 ${rows.length - 300} 筆（可用上方搜尋縮小範圍）</td></tr>` : '');
         }
 
+        // ===== 車種BOM（整合分頁）=====
+        const BOM_PATH = 'toolbox/bom';
+        let bomData = { updatedAt: '', models: [] };
+        let currentModel = null;
+        const COMP_ALIAS = {
+            level:['層次','階層','層級'],
+            item:['項目號碼','項次','項目'],
+            mat:['物件 ID','物件ID','料號','元件料號','物料','子件料號','元件'],
+            desc:['物件說明','品名','說明','物料說明'],
+            qty:['元件數量〈CUn〉','元件數量','用量','數量','組成用量'],
+            unit:['元件計量單位','單位','計量單位'],
+            type:['物料類型','類型','物料型態']
+        };
+        const SUM_ALIAS = { model:['車種','車型','機種'], part:['料號','成品料號','物料'] };
+        function bomModels() { return Array.isArray(bomData.models) ? bomData.models : Object.entries(bomData.models||{}).map(([name,v])=>({name,...v})); }
+        function findModel(n) { return bomModels().find(m => m.name === n); }
+        function normalizeBom(v) {
+            let models = v.models;
+            if (!Array.isArray(models)) models = Object.entries(models||{}).map(([name,m])=>({name,...m}));
+            models = models.filter(Boolean).map(m => ({ name: m.name, part: m.part||'', rows: Array.isArray(m.rows)?m.rows:Object.values(m.rows||{}) }));
+            return { updatedAt: v.updatedAt||'', models };
+        }
+        function initBom() {
+            const c = JSON.parse(localStorage.getItem('bomData') || 'null');
+            if (c) bomData = normalizeBom(c);
+            if (db) db.ref(BOM_PATH).on('value', s => {
+                const v = s.val();
+                if (v) { bomData = normalizeBom(v); localStorage.setItem('bomData', JSON.stringify(bomData)); if (document.getElementById('bomPanel').style.display !== 'none') renderBom(); }
+            });
+        }
+        function bomReadWb(file, cb) {
+            const r = new FileReader();
+            r.onload = e => { try { cb(null, XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:false })); } catch(err){ cb(err); } };
+            r.onerror = () => cb(new Error('讀檔失敗')); r.readAsArrayBuffer(file);
+        }
+        function bomMapAoa(aoa, alias) {
+            if (!aoa.length) return { rows: [], matched: [] };
+            let bestRow = 0, bestScore = -1;
+            for (let i = 0; i < Math.min(aoa.length, 6); i++) {
+                const cells = (aoa[i]||[]).map(x => String(x).trim());
+                let score = 0; Object.values(alias).forEach(al => { if (cells.some(c => al.includes(c))) score++; });
+                if (score > bestScore) { bestScore = score; bestRow = i; }
+            }
+            const header = (aoa[bestRow]||[]).map(x => String(x).trim());
+            const colIdx = {};
+            Object.entries(alias).forEach(([f, al]) => { const idx = header.findIndex(h => al.includes(h)); if (idx>=0) colIdx[f]=idx; });
+            const rows = [];
+            for (let i = bestRow+1; i < aoa.length; i++) {
+                const r = aoa[i]; if (!r || r.every(c => String(c).trim()==='')) continue;
+                const o = {}; Object.entries(colIdx).forEach(([f,idx])=>{ o[f]=r[idx]; }); rows.push(o);
+            }
+            return { rows, matched: Object.keys(colIdx) };
+        }
+        function bomAoa(wb, name) { return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' }); }
+        function importBom(file) {
+            if (!file) return;
+            bomReadWb(file, (err, wb) => {
+                if (err) { alert('讀取失敗：' + err.message); return; }
+                const sumName = wb.SheetNames.find(n => n.includes('彙整') || n.includes('彙總') || n.includes('總表'));
+                const partOf = {};
+                if (sumName) bomMapAoa(bomAoa(wb, sumName), SUM_ALIAS).rows.forEach(r => { const m=String(r.model||'').trim(); if(m) partOf[m]=String(r.part||'').trim(); });
+                const models = []; let totalRows = 0;
+                wb.SheetNames.forEach(n => {
+                    if (n === sumName) return;
+                    const res = bomMapAoa(bomAoa(wb, n), COMP_ALIAS);
+                    if (!res.matched.includes('mat')) return;
+                    const rows = res.rows.map(r => ({
+                        level: r.level ?? '', item: String(r.item ?? '').trim(),
+                        mat: String(r.mat ?? '').trim(), desc: String(r.desc ?? '').trim(),
+                        qty: r.qty === '' || r.qty == null ? '' : num(r.qty),
+                        unit: String(r.unit ?? '').trim(), type: String(r.type ?? '').trim()
+                    })).filter(r => r.mat);
+                    if (!rows.length) return;
+                    const key = n.trim();
+                    models.push({ name: key, part: partOf[key] || partOf[n] || '', rows });
+                    totalRows += rows.length;
+                });
+                if (!models.length) { alert('沒有讀到任何車種 BOM。請確認每個車種分頁含「物件 ID／料號」欄位。'); return; }
+                if (!confirm(`讀到 ${models.length} 個車種、共 ${totalRows} 筆元件。\n將【整批覆蓋】現有車種BOM，確定？`)) return;
+                bomData = { updatedAt: new Date().toLocaleString('zh-TW'), models };
+                localStorage.setItem('bomData', JSON.stringify(bomData));
+                if (db) db.ref(BOM_PATH).set(bomData);
+                currentModel = models[0].name; renderBom();
+                alert(`已匯入 ${models.length} 個車種、${totalRows} 筆元件`);
+            });
+        }
+        function clearBom() {
+            if (!confirm('確定清空所有車種 BOM？')) return;
+            bomData = { updatedAt: new Date().toLocaleString('zh-TW'), models: [] };
+            localStorage.setItem('bomData', JSON.stringify(bomData));
+            if (db) db.ref(BOM_PATH).set(bomData);
+            currentModel = null; renderBom();
+        }
+        function bomTplInfo() { alert('匯入格式：\n1) 一張「彙整表」分頁：車種、料號\n2) 每個車種各一張分頁（分頁名＝車種），欄位含：層次、物件 ID、物件說明、元件數量、元件計量單位、物料類型\n\n可直接匯入 SAP 匯出的「各車種BOM」檔。'); }
+        function selectModel(m) { currentModel = m; renderBom(); }
+        function renderBom() {
+            const models = bomModels();
+            const totalRows = models.reduce((s,m)=>s+(m.rows||[]).length,0);
+            document.getElementById('bomMeta').textContent = models.length ? `${models.length} 個車種・${totalRows} 筆元件` + (bomData.updatedAt?`・更新於 ${bomData.updatedAt}`:'') : '';
+            document.getElementById('bomSidebar').innerHTML = models.map(m =>
+                `<div class="bom-model ${m.name===currentModel?'active':''}" onclick="selectModel('${m.name.replace(/'/g,"\\'")}')">${esc(m.name)}<br><span class="cnt">${(m.rows||[]).length} 筆</span></div>`).join('');
+            const content = document.getElementById('bomContent');
+            if (!models.length) { content.innerHTML = '<div class="empty-hint">尚無車種BOM，點「📥 匯入車種BOM」</div>'; return; }
+            if (!currentModel || !findModel(currentModel)) currentModel = models[0].name;
+            const md = findModel(currentModel);
+            const kw = (document.getElementById('bomSearch')?.value || '').trim().toLowerCase();
+            let rows = md.rows || [];
+            if (kw) rows = rows.filter(r => (r.mat + r.desc).toLowerCase().includes(kw));
+            content.innerHTML =
+                `<div class="bom-head">${esc(currentModel)}</div>
+                 <div class="bom-sub">成品料號：${esc(md.part||'（未對應）')}　・　${(md.rows||[]).length} 筆元件</div>
+                 <input class="search" id="bomSearch" placeholder="🔍 篩選料號或品名" value="${esc(kw)}" oninput="renderBom()">
+                 <div class="table-wrap"><table class="data"><tr><th>層次</th><th>項目</th><th>料號</th><th>品名</th><th>用量</th><th>單位</th><th>類型</th></tr>` +
+                rows.slice(0,500).map(r => `<tr><td><span class="lv">${esc(r.level)}</span></td><td>${esc(r.item)}</td><td>${esc(r.mat)}</td><td>${esc(r.desc)}</td><td>${esc(r.qty)}</td><td>${esc(r.unit)}</td><td>${esc(r.type)}</td></tr>`).join('') +
+                (rows.length>500?`<tr><td colspan="7" style="color:#999">…其餘 ${rows.length-500} 筆（用搜尋縮小）</td></tr>`:'') + '</table></div>';
+            const sb = document.getElementById('bomSearch');
+            if (kw && sb) { sb.focus(); sb.setSelectionRange(sb.value.length, sb.value.length); }
+        }
+
         initTabs();
         initData();
+        initBom();
     </script>
 </body>
 </html>
