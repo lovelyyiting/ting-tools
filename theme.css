@@ -1,0 +1,68 @@
+/* 文青風主題：溫暖紙感、低彩度大地色、襯線字。載入於各頁 inline <style> 之後以覆蓋外觀 */
+:root {
+    --paper: #efe9dc;
+    --card: #faf6ec;
+    --ink: #4a4640;
+    --muted: #8f8778;
+    --line: #e4dccb;
+    --sage: #7a8663;
+    --sage-deep: #6e7a58;
+}
+
+body {
+    background: #efe9dc !important;
+    color: var(--ink);
+    font-family: "Noto Serif TC", "Songti TC", "Source Han Serif TC", "STSong", "PMingLiU", serif !important;
+    letter-spacing: 0.02em;
+}
+
+/* 外框卡片：紙白、細邊、柔和陰影 */
+.container {
+    background: var(--card) !important;
+    box-shadow: 0 6px 24px rgba(90, 78, 55, 0.14) !important;
+    border: 1px solid var(--line);
+}
+
+/* 頁首：低彩度色塊、襯線標題 */
+.header h1, .header h2, h1, h2, h3 { font-weight: 500; letter-spacing: 0.04em; }
+.header p { opacity: 0.85; }
+
+/* 首頁工具卡 */
+.tool-card {
+    background: var(--card) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line);
+    box-shadow: 0 4px 16px rgba(90, 78, 55, 0.12) !important;
+    border-radius: 12px !important;
+}
+.tool-card:hover { box-shadow: 0 10px 26px rgba(90, 78, 55, 0.2) !important; transform: translateY(-3px); }
+.tool-card h2 { color: var(--sage-deep) !important; }
+.tool-card p { color: var(--muted) !important; }
+.header, .footer { color: #fffdf8; }
+.footer { color: rgba(255, 253, 248, 0.75); }
+
+/* 內容區小卡、面板：紙感 */
+.section, .imp-card, .rcard, .month, .modal-box, .tool-card, .password-box {
+    background: var(--card) !important;
+    border-color: var(--line) !important;
+}
+.rcard { background: #f3eee2 !important; }
+
+/* 表格：柔和分隔線、暖色標題列 */
+table.data th { background: #ece5d6 !important; color: #5c564a !important; }
+table.data td { border-bottom-color: #ece5d6 !important; }
+
+/* 次要按鈕、輸入框描邊統一暖色 */
+.btn-sub, .tpl-btn, .export-btn, .filter-btn {
+    border-color: var(--line) !important;
+    color: #6a6357 !important;
+    background: #f6f1e6 !important;
+}
+input, select, textarea { border-color: var(--line) !important; }
+
+/* 分頁籤 */
+.tab { color: #6a6357; }
+.tabs { border-bottom-color: var(--line) !important; }
+
+/* 卷軸與細節收斂 */
+.toolbar, .actions { border-bottom-color: var(--line) !important; }
