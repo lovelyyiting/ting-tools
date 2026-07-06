@@ -78,6 +78,9 @@
         }
         table.data td { padding: 6px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
         td.na { color: #dc3545; font-weight: bold; }
+        td.jok { color: #28a745; font-weight: bold; }
+        td.jlate { color: #fd7e14; font-weight: bold; }
+        td.jbad { color: #dc3545; font-weight: bold; }
         .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
         .hidden { display: none; }
         .note { font-size: 12px; color: #999; margin-top: 10px; line-height: 1.6; }
@@ -91,7 +94,7 @@
         <div class="header">
             <a class="back-link" href="index.html">← 首頁</a>
             <h1>🧩 缺料模擬展出工具</h1>
-            <p>匯入今日主檔＋佔量結果，自動查項次/批次/廠商，分成產線缺料與精密缺料</p>
+            <p>匯入今日主檔＋佔量結果，自動查項次/批次/廠商，分成產線缺料與精密缺料；可加匯達交交期，判定近期到料能否滿足</p>
         </div>
 
         <div class="body">
@@ -111,6 +114,13 @@
                     <input type="file" id="file-master" accept=".xlsx,.xls" class="hidden" onchange="importMaster(this.files[0]); this.value='';">
                     <div class="btns"><button class="imp-btn" onclick="document.getElementById('file-master').click()">📥 匯入主檔</button></div>
                 </div>
+                <div class="imp-card">
+                    <h4>🚚 物料達交交期（選填）</h4>
+                    <div class="desc">SAP 採購單交期匯出（產品/物料、供應數量、統計相關交貨日期）。匯入後展出會多「預計到齊／達交判定」：同料號在途依交期先後，分給需求日最早的缺料。</div>
+                    <div class="status no" id="st-delivery">尚未匯入（不匯也能展出，只是沒有達交判定）</div>
+                    <input type="file" id="file-delivery" accept=".xlsx,.xls,.csv" class="hidden" onchange="importDelivery(this.files[0]); this.value='';">
+                    <div class="btns"><button class="imp-btn" onclick="document.getElementById('file-delivery').click()">📥 匯入達交交期</button></div>
+                </div>
             </div>
 
             <div class="run-row">
@@ -127,7 +137,8 @@
                     <button class="dl-btn" onclick="downloadResult()">⬇️ 下載結果 Excel</button>
                 </div>
                 <div class="table-wrap"><table class="data" id="resultTable"></table></div>
-                <div class="note">分類方式：訂單出現在成車工單表→產線；出現在精密機電工單表→精密；兩表都查不到→未分類。項次/批次由工單表帶入、廠商由料號廠商對照表帶入，查不到標「查無」。</div>
+                <div class="note">分類方式：訂單出現在成車工單表→產線；出現在精密機電工單表→精密；兩表都查不到→未分類。項次/批次由工單表帶入、廠商由料號廠商對照表帶入，查不到標「查無」。<br>
+                達交判定（需匯入達交交期）：同料號的在途量依交期先後、優先分配給需求日最早的缺料列；「預計到齊」＝該列短缺量被在途補滿的那天。✅可滿足＝到齊日不晚於需求日；⚠️晚N天＝到齊日超過需求日；❌＝沒有在途或在途量不夠。交期已過但仍列在途的會標「含逾期在途」提醒催料。</div>
             </div>
         </div>
     </div>
@@ -149,8 +160,17 @@
                 shortQty:['物料短缺','短缺數量','缺料數量','物料短缺數量','短缺']
             },
             wo: { order:['工單','工單號碼','訂單'], item:['項次'], batch:['批次'], line:['線別'] },
-            vendor: { mat:['物料','料號'], vendor:['廠商','供應商名稱'] }
+            vendor: { mat:['物料','料號'], vendor:['廠商','供應商名稱'] },
+            delivery: {
+                mat:['產品/物料','物料','料號','產品','物料號碼'],
+                qty:['供應數量','數量','在途數量','交貨數量'],
+                dateT:['統計相關交貨日期'],
+                dateC:['供應日期','交期','到貨日','交貨日','預計到貨日','達交日'],
+                elem:['MRP元素描述','MRP元素']
+            }
         };
+        // 達交交期只算真的在途供應（有元素欄時過濾；沒有就全收）
+        const DELIVERY_KEEP = ['發貨通知', '採購單項目', '生產訂單'];
         // 主檔分頁辨識
         const SHEET_IS = {
             woMain: n => n.includes('成車'),
@@ -162,28 +182,37 @@
             allocation: load('allocation'),
             woMain: load('woMain'),
             woPrecision: load('woPrecision'),
-            vendor: load('vendor')
+            vendor: load('vendor'),
+            delivery: load('delivery')
         };
         function load(k){ return JSON.parse(localStorage.getItem('exp_'+k) || 'null') || { updatedAt:'', rows:[] }; }
         function save(k){ localStorage.setItem('exp_'+k, JSON.stringify(store[k])); if(db) db.ref('toolbox/explode/'+k).set(store[k]); }
 
         let result = { main: [], prec: [], none: [] };
-        const OUT_COLS = ['訂單','項次','批次','溯源需求','物料','MRPCn','物料短文','工廠','需求日期','需求數量','承約數量','物料短缺','廠商'];
+        const OUT_COLS = ['訂單','項次','批次','溯源需求','物料','MRPCn','物料短文','工廠','需求日期','需求數量','承約數量','物料短缺','廠商','預計到齊','達交判定','在途分配'];
 
         function initData() {
-            renderAllocStatus(); renderMasterStatus();
+            renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
             if (db) {
-                ['allocation','woMain','woPrecision','vendor'].forEach(k => {
+                ['allocation','woMain','woPrecision','vendor','delivery'].forEach(k => {
                     db.ref('toolbox/explode/'+k).on('value', snap => {
                         const v = snap.val();
                         if (v) {
                             if (!Array.isArray(v.rows)) v.rows = Object.values(v.rows||{});
                             store[k] = v; localStorage.setItem('exp_'+k, JSON.stringify(v));
-                            renderAllocStatus(); renderMasterStatus();
+                            renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
                         }
                     });
                 });
             }
+        }
+
+        function renderDeliveryStatus() {
+            const el = document.getElementById('st-delivery'); const d = store.delivery;
+            if (d.rows && d.rows.length) {
+                const mats = new Set(d.rows.map(r => r.mat)).size;
+                el.className='status ok'; el.textContent=`✅ ${d.rows.length} 筆在途・${mats} 個料號`+(d.updatedAt?`・${d.updatedAt}`:'');
+            } else { el.className='status no'; el.textContent='尚未匯入（不匯也能展出，只是沒有達交判定）'; }
         }
 
         function renderAllocStatus() {
@@ -289,6 +318,35 @@
             });
         }
 
+        function importDelivery(file) {
+            if (!file) return;
+            readWorkbook(file, (err, wb) => {
+                if (err) { alert('讀取失敗：' + err.message); return; }
+                const res = mapAoa(sheetToAoa(wb, wb.SheetNames[0]), ALIAS.delivery);
+                if (!res.matched.includes('mat') || !res.matched.includes('qty')) {
+                    alert('達交交期檔需要至少有「物料（或產品/物料）」與「供應數量（或數量）」欄位'); return;
+                }
+                if (!res.matched.includes('dateT') && !res.matched.includes('dateC')) {
+                    alert('達交交期檔找不到日期欄（統計相關交貨日期／交期／到貨日）'); return;
+                }
+                const hasElem = res.matched.includes('elem');
+                const rows = [];
+                res.rows.forEach(r => {
+                    const mat = String(r.mat ?? '').trim();
+                    if (!mat) return;
+                    if (hasElem && !DELIVERY_KEEP.includes(String(r.elem ?? '').trim())) return;
+                    const qty = num(r.qty);
+                    if (qty <= 0) return;
+                    const date = parseDateCell(r.dateT) || parseDateCell(r.dateC);
+                    rows.push({ mat, qty, date });
+                });
+                if (!rows.length) { alert('沒有讀到任何有效的在途明細（檢查數量與日期欄）'); return; }
+                store.delivery = { updatedAt: new Date().toLocaleString('zh-TW'), rows };
+                save('delivery'); renderDeliveryStatus();
+                alert(`達交交期已匯入 ${rows.length} 筆在途` + (hasElem ? '（已過濾為發貨通知/採購單/生產訂單）' : ''));
+            });
+        }
+
         function fmtNeed(v) {
             if (v == null || v === '') return '';
             const asNum = Number(v);
@@ -311,11 +369,54 @@
             store.woPrecision.rows.forEach(r => { const k=String(r.order??'').trim(); if(k) precMap[k]=r; });
             store.vendor.rows.forEach(r => { const k=String(r.mat??'').trim(); if(k) vendorMap[k]=r.vendor; });
 
+            // ===== 達交交期比對：同料號在途依交期先後，分給需求日最早的缺料列 =====
+            const judge = new Array(B.rows.length).fill(null);
+            const deliv = store.delivery.rows || [];
+            let jOk = 0, jLate = 0, jBad = 0;
+            if (deliv.length) {
+                const today = todayStr();
+                const poMap = {};
+                deliv.forEach(r => (poMap[r.mat] = poMap[r.mat] || []).push({ date: r.date || '', remain: num(r.qty) }));
+                Object.values(poMap).forEach(l => l.sort((a, b) => ((a.date || '9999') < (b.date || '9999') ? -1 : 1)));
+                const shortDate = ds => { const p = ds.split('-'); return Number(p[1]) + '/' + Number(p[2]); };
+                B.rows.map((r, i) => ({ i, need: parseDateCell(r.needDate) || '9999-12-31' }))
+                    .sort((a, b) => (a.need < b.need ? -1 : a.need > b.need ? 1 : a.i - b.i))
+                    .forEach(o => {
+                        const r = B.rows[o.i];
+                        const mat = String(r.mat ?? '').trim();
+                        const needDs = parseDateCell(r.needDate);
+                        let short = num(r.shortQty);
+                        if (short <= 0) { judge[o.i] = { done: '', verdict: '', alloc: '', cls: '' }; return; }
+                        const list = poMap[mat];
+                        if (!list || !list.length) { judge[o.i] = { done: '', verdict: '❌無在途', alloc: '', cls: 'jbad' }; jBad++; return; }
+                        const allocs = [];
+                        for (const p of list) {
+                            if (short <= 0) break;
+                            if (p.remain <= 0) continue;
+                            const take = Math.min(p.remain, short);
+                            p.remain -= take; short -= take;
+                            allocs.push({ date: p.date, qty: take });
+                        }
+                        const allocStr = allocs.map(a => (a.date ? shortDate(a.date) : '無日期') + '×' + a.qty).join('、');
+                        if (short > 0) { judge[o.i] = { done: '', verdict: `❌在途不足(還缺${short})`, alloc: allocStr, cls: 'jbad' }; jBad++; return; }
+                        const doneDate = allocs.reduce((mx, a) => (a.date > mx ? a.date : mx), '');
+                        const pastDue = allocs.some(a => a.date && a.date < today);
+                        let verdict = '✅可滿足', cls = 'jok';
+                        if (needDs && doneDate && doneDate > needDs) {
+                            const days = Math.round((new Date(doneDate) - new Date(needDs)) / 86400000);
+                            verdict = `⚠️晚${days}天到齊`; cls = 'jlate'; jLate++;
+                        } else if (pastDue) {
+                            verdict = '⚠️量夠但含逾期在途(請催)'; cls = 'jlate'; jLate++;
+                        } else { jOk++; }
+                        judge[o.i] = { done: doneDate ? fmtNeed(doneDate) : '', verdict, alloc: allocStr, cls };
+                    });
+            }
+
             const NA = '查無';
             result = { main: [], prec: [], none: [] };
             let naItem = 0, naVendor = 0;
 
-            B.rows.forEach(r => {
+            B.rows.forEach((r, bi) => {
                 const order = String(r.order ?? '').trim();
                 const mat = String(r.mat ?? '').trim();
                 let group, wo = null;
@@ -327,11 +428,13 @@
                 const vendor = vendorMap[mat]!=null && vendorMap[mat]!=='' ? vendorMap[mat] : NA;
                 if (item===NA) naItem++;
                 if (vendor===NA) naVendor++;
+                const j = judge[bi] || { done: '', verdict: '', alloc: '', cls: '' };
                 result[group].push({
                     '訂單':order, '項次':item, '批次':batch, '溯源需求':r.src??'', '物料':mat,
                     'MRPCn':r.mrp??'', '物料短文':r.desc??'', '工廠':r.plant??'',
                     '需求日期':fmtNeed(r.needDate), '需求數量':r.needQty??'',
-                    '承約數量':r.commitQty??'', '物料短缺':r.shortQty??'', '廠商':vendor
+                    '承約數量':r.commitQty??'', '物料短缺':r.shortQty??'', '廠商':vendor,
+                    '預計到齊':j.done, '達交判定':j.verdict, '在途分配':j.alloc, '_jcls':j.cls
                 });
             });
 
@@ -348,6 +451,8 @@
             if (result.none.length) warns.push(`有 <b>${result.none.length}</b> 筆訂單在兩張工單表都查不到（歸「未分類」，請確認主檔是否為最新）`);
             if (naItem) warns.push(`有 <b>${naItem}</b> 筆查無項次/批次`);
             if (naVendor) warns.push(`有 <b>${naVendor}</b> 筆查無廠商（可更新料號廠商對照表）`);
+            if (deliv.length) warns.push(`達交判定：✅可滿足 <b>${jOk}</b> 筆・⚠️晚到/逾期 <b>${jLate}</b> 筆・❌無在途/不足 <b>${jBad}</b> 筆`);
+            else warns.push('未匯入「物料達交交期」，本次展出沒有達交判定（要看近期到料能否滿足，請匯入採購單交期檔）');
             document.getElementById('warnArea').innerHTML = warns.length ? `<div class="warnbox">⚠️ ${warns.join('<br>')}</div>` : '';
 
             document.getElementById('cnt-main').textContent = `(${result.main.length})`;
@@ -366,7 +471,11 @@
             if (!rows.length) { table.innerHTML = `<tr><td><div class="empty-hint">此分類沒有資料</div></td></tr>`; return; }
             table.innerHTML =
                 '<tr>' + OUT_COLS.map(c => `<th>${c}</th>`).join('') + '</tr>' +
-                rows.map(r => '<tr>' + OUT_COLS.map(c => `<td class="${r[c]==='查無'?'na':''}">${esc(r[c])}</td>`).join('') + '</tr>').join('');
+                rows.map(r => '<tr>' + OUT_COLS.map(c => {
+                    let cls = r[c] === '查無' ? 'na' : '';
+                    if (c === '達交判定' && r._jcls) cls = r._jcls;
+                    return `<td class="${cls}">${esc(r[c])}</td>`;
+                }).join('') + '</tr>').join('');
         }
 
         function downloadResult() {
