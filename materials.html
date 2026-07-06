@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>物料資料管理</title>
+    <title>BOM</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
@@ -178,29 +178,12 @@
     <div class="container">
         <div class="header">
             <a class="back-link" href="index.html">← 首頁</a>
-            <h1>📦 物料資料管理</h1>
-            <p>基本交期・在途交期・BOM・庫存・車種BOM，每天用 Excel 一鍵更新</p>
+            <h1>📦 BOM</h1>
+            <p>車種 BOM 維護（訂單排程缺料分析用它展開計算），用 Excel 一鍵整批更新</p>
         </div>
 
-        <div class="tabs" id="tabs"></div>
-
-        <div class="panel" id="stdPanel">
-            <div class="actions">
-                <button class="import-btn" onclick="document.getElementById('fileInput').click()">📥 匯入 Excel（整批覆蓋）</button>
-                <button class="tpl-btn" onclick="downloadTpl()">⬇️ 下載範本</button>
-                <button class="clear-btn" onclick="clearData()">🗑️ 清空</button>
-                <span class="meta" id="meta"></span>
-            </div>
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importFile(this.files[0]); this.value='';">
-            <input type="text" class="search" id="searchBox" placeholder="🔍 輸入料號或品名篩選" oninput="renderTable()">
-            <div class="table-wrap">
-                <table class="data" id="dataTable"></table>
-            </div>
-            <div class="note" id="note"></div>
-        </div>
-
-        <!-- 車種BOM 分頁 -->
-        <div class="panel" id="bomPanel" style="display:none">
+        <!-- 車種BOM -->
+        <div class="panel" id="bomPanel">
             <div class="actions">
                 <button class="import-btn" onclick="document.getElementById('bomFile').click()">📥 匯入車種BOM（整批覆蓋）</button>
                 <button class="tpl-btn" onclick="bomTplInfo()">⬇️ 格式說明</button>
@@ -218,154 +201,7 @@
 
     <script src="common.js?v=20260706b"></script>
     <script>
-        // 四種資料集的定義：路徑、範本欄位、解析與顯示方式
-        const DATASETS = {
-            leadtime: {
-                title: '基本交期',
-                path: 'toolbox/materials/leadtime',
-                headers: ['料號', '品名', '基本交期(天)'],
-                example: ['RM-0001', '外殼原料', 14],
-                cols: [['mat','料號'], ['name','品名'], ['days','基本交期(天)']],
-                note: '每個料號的採購前置時間（工作天）。缺料分析會用它推算「現在下單最快何時到貨」。',
-                parse(rows, map) {
-                    return rows.map(r => ({
-                        mat: String(cell(r, map, 'mat')).trim(),
-                        name: String(cell(r, map, 'name')).trim(),
-                        days: num(cell(r, map, 'ltDays'))
-                    })).filter(r => r.mat);
-                }
-            },
-            incoming: {
-                title: '在途交期（實際）',
-                path: 'toolbox/materials/incoming',
-                headers: ['料號', '數量', '交期', '採購單號'],
-                example: ['RM-0001', 500, '2026-07-15', 'PO-12345'],
-                cols: [['mat','料號'], ['qty','數量'], ['date','交期'], ['po','採購單號']],
-                note: '已下單、尚未入庫的採購明細與實際交期。同一料號可以有多筆。交期已過但還沒入庫的，缺料分析會標紅色警訊。',
-                parse(rows, map) {
-                    return rows.map(r => ({
-                        mat: String(cell(r, map, 'mat')).trim(),
-                        qty: num(cell(r, map, 'qty')),
-                        date: parseDateCell(cell(r, map, 'dueDate')),
-                        po: String(cell(r, map, 'po')).trim()
-                    })).filter(r => r.mat && r.qty > 0);
-                }
-            },
-            inventory: {
-                title: '庫存',
-                path: 'toolbox/materials/inventory',
-                headers: ['料號', '品名', '庫存數量'],
-                example: ['RM-0001', '外殼原料', 1200],
-                cols: [['mat','料號'], ['name','品名'], ['qty','庫存數量']],
-                note: '目前各料號的可用庫存。缺料分析會依排程順序逐張工單扣抵。',
-                parse(rows, map) {
-                    return rows.map(r => ({
-                        mat: String(cell(r, map, 'mat')).trim(),
-                        name: String(cell(r, map, 'name')).trim(),
-                        qty: num(cell(r, map, 'stock') !== '' ? cell(r, map, 'stock') : cell(r, map, 'qty'))
-                    })).filter(r => r.mat);
-                }
-            }
-        };
-
-        let currentKey = 'leadtime';
-        const cache = {};  // key → {updatedAt, rows}
-
-        function initTabs() {
-            document.getElementById('tabs').innerHTML = Object.entries(DATASETS).map(([k, d]) =>
-                `<div class="tab ${k === currentKey ? 'active' : ''}" data-key="${k}" onclick="switchTab('${k}')">${d.title}</div>`
-            ).join('') + `<div class="tab" data-key="bommodel" onclick="switchTab('bommodel')">車種BOM</div>`;
-        }
-
-        function switchTab(k) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.key === k));
-            const isBom = k === 'bommodel';
-            document.getElementById('stdPanel').style.display = isBom ? 'none' : '';
-            document.getElementById('bomPanel').style.display = isBom ? '' : 'none';
-            if (isBom) { renderBom(); return; }
-            currentKey = k;
-            document.getElementById('searchBox').value = '';
-            renderTable();
-        }
-
-        function initData() {
-            Object.entries(DATASETS).forEach(([k, d]) => {
-                cache[k] = JSON.parse(localStorage.getItem('mat_' + k) || '{"rows":[]}');
-                if (db) {
-                    db.ref(d.path).on('value', snap => {
-                        cache[k] = snap.val() || { rows: [] };
-                        if (!Array.isArray(cache[k].rows)) cache[k].rows = Object.values(cache[k].rows || {});
-                        localStorage.setItem('mat_' + k, JSON.stringify(cache[k]));
-                        if (k === currentKey) renderTable();
-                    });
-                }
-            });
-            renderTable();
-        }
-
-        function importFile(file) {
-            if (!file) return;
-            const d = DATASETS[currentKey];
-            readExcelFile(file, (err, rows) => {
-                if (err) { alert('讀取 Excel 失敗：' + err.message); return; }
-                if (!rows.length) { alert('檔案裡沒有資料'); return; }
-                const map = buildHeaderMap(rows[0]);
-                const parsed = d.parse(rows, map);
-                if (!parsed.length) {
-                    alert('找不到可匯入的資料。\n請確認標題列包含：' + d.headers.join('、') + '\n（可先按「下載範本」比對格式）');
-                    return;
-                }
-                const skipped = rows.length - parsed.length;
-                if (!confirm(`即將以 ${parsed.length} 筆資料【整批覆蓋】現有的「${d.title}」` +
-                    (skipped > 0 ? `\n（有 ${skipped} 筆因缺少必要欄位被略過）` : '') + '\n\n確定匯入？')) return;
-                const data = { updatedAt: new Date().toLocaleString('zh-TW'), rows: parsed };
-                cache[currentKey] = data;
-                localStorage.setItem('mat_' + currentKey, JSON.stringify(data));
-                if (db) db.ref(d.path).set(data);
-                renderTable();
-                alert(`「${d.title}」已更新：${parsed.length} 筆`);
-            });
-        }
-
-        function clearData() {
-            const d = DATASETS[currentKey];
-            if (!confirm(`確定清空「${d.title}」全部資料？`)) return;
-            const data = { updatedAt: new Date().toLocaleString('zh-TW'), rows: [] };
-            cache[currentKey] = data;
-            localStorage.setItem('mat_' + currentKey, JSON.stringify(data));
-            if (db) db.ref(d.path).set(data);
-            renderTable();
-        }
-
-        function downloadTpl() {
-            const d = DATASETS[currentKey];
-            downloadTemplate(d.title + '_匯入範本.xlsx', d.headers, d.example);
-        }
-
-        function renderTable() {
-            const d = DATASETS[currentKey];
-            const data = cache[currentKey] || { rows: [] };
-            const kw = document.getElementById('searchBox').value.trim().toLowerCase();
-            let rows = data.rows || [];
-            if (kw) rows = rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(kw)));
-
-            document.getElementById('meta').textContent =
-                `共 ${(data.rows || []).length} 筆` + (data.updatedAt ? `・最後更新：${data.updatedAt}` : '');
-            document.getElementById('note').textContent = '💡 ' + d.note;
-
-            const table = document.getElementById('dataTable');
-            if (!rows.length) {
-                table.innerHTML = `<tr><td><div class="empty-hint">尚無資料，點「📥 匯入 Excel」開始</div></td></tr>`;
-                return;
-            }
-            const shown = rows.slice(0, 300);
-            table.innerHTML =
-                '<tr>' + d.cols.map(c => `<th>${c[1]}</th>`).join('') + '</tr>' +
-                shown.map(r => '<tr>' + d.cols.map(c => `<td>${esc(r[c[0]])}</td>`).join('') + '</tr>').join('') +
-                (rows.length > 300 ? `<tr><td colspan="${d.cols.length}" style="color:#999">…其餘 ${rows.length - 300} 筆（可用上方搜尋縮小範圍）</td></tr>` : '');
-        }
-
-        // ===== 車種BOM（整合分頁）=====
+        // ===== 車種BOM =====
         const BOM_PATH = 'toolbox/bom';
         let bomData = { updatedAt: '', models: [] };
         let currentModel = null;
@@ -392,7 +228,7 @@
             if (c) bomData = normalizeBom(c);
             if (db) db.ref(BOM_PATH).on('value', s => {
                 const v = s.val();
-                if (v) { bomData = normalizeBom(v); localStorage.setItem('bomData', JSON.stringify(bomData)); if (document.getElementById('bomPanel').style.display !== 'none') renderBom(); }
+                if (v) { bomData = normalizeBom(v); localStorage.setItem('bomData', JSON.stringify(bomData)); renderBom(); }
             });
         }
         function bomReadWb(file, cb) {
@@ -484,9 +320,8 @@
             if (kw && sb) { sb.focus(); sb.setSelectionRange(sb.value.length, sb.value.length); }
         }
 
-        initTabs();
-        initData();
         initBom();
+        renderBom();
     </script>
 </body>
 </html>

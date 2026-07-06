@@ -266,7 +266,7 @@
 
         <div class="panel">
             <div class="table-wrap">
-                <table class="data" id="resultTable"><tr><td><div class="empty-hint">請上傳 4 個檔案後按「開始分析」。BOM 用雲端「物料資料管理 → 車種BOM」的資料。</div></td></tr></table>
+                <table class="data" id="resultTable"><tr><td><div class="empty-hint">請上傳 4 個檔案後按「開始分析」。BOM 用雲端「BOM」工具的資料。</div></td></tr></table>
             </div>
         </div>
     </div>
@@ -648,7 +648,7 @@
             const nb = Object.entries(nobom);
             if (nb.length) {
                 wb.style.display = 'block';
-                wb.innerHTML = '⚠️ 查無 BOM 的成品料號（這些批次沒算到，請到「物料資料管理→車種BOM」補）：' +
+                wb.innerHTML = '⚠️ 查無 BOM 的成品料號（這些批次沒算到，請到「BOM」工具補）：' +
                     nb.map(([p, c]) => `<b>${esc(p)}</b>（${c} 批）`).join('、');
             } else wb.style.display = 'none';
 
@@ -722,7 +722,7 @@
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3), '缺料明細');
 
             const aoa4 = [['成品料號', '出現批次數', '說明']];
-            Object.entries(nobom).forEach(([p, c]) => aoa4.push([p, c, '雲端BOM查無此成品，請到「物料資料管理→車種BOM」補上']));
+            Object.entries(nobom).forEach(([p, c]) => aoa4.push([p, c, '雲端BOM查無此成品，請到「BOM」工具補上']));
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa4), '查無BOM料號');
 
             XLSX.writeFile(wb, `訂單排程缺料分析_${today}.xlsx`);
