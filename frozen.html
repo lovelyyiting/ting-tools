@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frozen 進度追蹤</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container {
+            max-width: 1350px; margin: 0 auto; background: white;
+            border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white; padding: 20px; text-align: center; position: relative;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link {
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: white; text-decoration: none; font-size: 14px;
+            background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px;
+        }
+        .toolbar {
+            display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px;
+            border-bottom: 1px solid #eee; align-items: center; font-size: 14px;
+        }
+        .imp-btn, .save-btn {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white;
+            border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer;
+        }
+        .save-btn { background: linear-gradient(135deg, #bd8a63 0%, #a06e44 100%); }
+        .export-btn {
+            border: 1px solid #ccc; background: white; padding: 8px 14px;
+            border-radius: 8px; font-size: 14px; cursor: pointer; color: #555;
+        }
+        .toolbar label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .toolbar input[type=date] { padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .planstat { font-size: 12px; color: #999; padding: 8px 20px 0; }
+        .tabs { display: flex; gap: 6px; padding: 12px 20px 0; flex-wrap: wrap; }
+        .tab-btn {
+            border: 1px solid #ccc; background: white; padding: 7px 16px; border-radius: 16px;
+            font-size: 13.5px; cursor: pointer; color: #555;
+        }
+        .tab-btn.active { background: #7a8663; border-color: #7a8663; color: white; }
+        .summary { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 20px 0; }
+        .chip { padding: 7px 16px; border-radius: 18px; font-size: 14px; color: white; }
+        .chip.green { background: #28a745; }
+        .chip.red { background: #dc3545; }
+        .chip.orange { background: #fd7e14; }
+        .chip.info { background: #6c757d; }
+        .panel { padding: 12px 20px 30px; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 70vh; overflow-y: auto; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 1150px; }
+        table.data th {
+            background: #f5f6fa; padding: 8px 7px; text-align: left; color: #555;
+            white-space: nowrap; position: sticky; top: 0; z-index: 1;
+        }
+        table.data td { padding: 6px 7px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        tr.behind td { background: #fff5f5; }
+        tr.donebatch td { background: #f4faf4; color: #999; }
+        td.neg { color: #dc3545; font-weight: bold; }
+        td.pos { color: #28a745; font-weight: bold; }
+        td input.done-in {
+            width: 72px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px;
+            font-size: 13px; text-align: right;
+        }
+        td input.done-in.filled { border-color: #7a8663; background: #f3f6ee; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
+        .note { font-size: 12px; color: #999; padding: 10px 20px 0; line-height: 1.7; }
+        .hidden { display: none; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>🧊 Frozen 進度追蹤</h1>
+            <p>匯入 Frozen 排程 → 每天填前一天完成量 → 自動算尾數、達成率、落後多少</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="imp-btn" onclick="document.getElementById('fzFile').click()">📥 匯入 Frozen 表（整批覆蓋）</button>
+            <input type="file" id="fzFile" accept=".xlsx,.xls" class="hidden" onchange="fzImport(this.files[0]); this.value='';">
+            <label>基準日 <input type="date" id="fzBase" onchange="fzRender()"></label>
+            <label>完成量輸入日期 <input type="date" id="fzDoneDate" onchange="fzRender()"></label>
+            <button class="save-btn" onclick="fzSaveDone()">💾 儲存完成量</button>
+            <label><input type="checkbox" id="fzRecent" checked onchange="fzRender()"> 只看近期批次</label>
+            <button class="export-btn" onclick="fzExport()">⬇️ 匯出 Excel</button>
+        </div>
+
+        <div class="planstat" id="fzStat">尚未匯入 Frozen 表</div>
+        <div class="tabs" id="fzTabs"></div>
+        <div class="summary" id="fzSummary"></div>
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="fzTable"><tr><td><div class="empty-hint">請先匯入 Frozen 表 Excel（工具會自動辨識各產線分頁）</div></td></tr></table>
+            </div>
+        </div>
+        <div class="note" style="padding:0 20px 24px;">
+            說明：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706b"></script>
+    <script>
+        // ===== 資料 =====
+        let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
+        let fzDone = {};                              // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
+        let fzLine = '';
+
+        const FZ_ALIAS = {
+            date:  ['裝配日期', '生產日期', '半品生產日', '日期'],
+            wo:    ['工單號碼', '工單'],
+            batch: ['批次'],
+            part:  ['零件編號', '料號'],
+            desc:  ['規格敘述', '品名'],
+            mo:    ['MO量', '工單數量'],
+            plan1: ['實際排程量', '排程量', '排產數量'],
+            plan2: ['落後/其他排程量', '落後排程量', '其他排程量', '其他排產數量', '落後排程', '其他工序排程量'],
+            rate:  ['每小時產出']
+        };
+        const FZ_SKIP_SHEET = n => /備案|工作表|盤點/.test(n);
+        const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
+
+        // 讀分頁 → aoa，欄數截斷（精密機電有上萬空欄）
+        function fzAoa(wb, name, maxCol = 20, maxRow = 3000) {
+            const ws = wb.Sheets[name];
+            if (!ws || !ws['!ref']) return [];
+            const rg = XLSX.utils.decode_range(ws['!ref']);
+            rg.e.c = Math.min(rg.e.c, maxCol - 1);
+            rg.e.r = Math.min(rg.e.r, maxRow - 1);
+            return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, range: XLSX.utils.encode_range(rg) });
+        }
+        const norm = s => String(s ?? '').replace(/\s/g, '');
+
+        // 解析一個產線分頁：自動找標題列（別名比對，忽略空白/換行），日期往下沿用
+        function fzParseSheet(aoa) {
+            let hRow = -1, idx = {};
+            for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+                const cells = (aoa[i] || []).map(norm);
+                const m = {};
+                Object.entries(FZ_ALIAS).forEach(([f, al]) => {
+                    const j = cells.findIndex(c => c && al.includes(c));
+                    if (j >= 0 && m[f] === undefined) m[f] = j;
+                });
+                if (m.date !== undefined && m.batch !== undefined && m.part !== undefined) { hRow = i; idx = m; break; }
+            }
+            if (hRow < 0) return null;
+            const rows = [];
+            let curDate = '';
+            for (let i = hRow + 1; i < aoa.length; i++) {
+                const r = aoa[i] || [];
+                const dv = r[idx.date];
+                if (dv != null && dv !== '') {
+                    const ds = parseDateCell(dv);
+                    if (ds) curDate = ds;
+                }
+                const batch = String(r[idx.batch] ?? '').trim();
+                const part = String(r[idx.part] ?? '').trim();
+                if (!batch || !part) continue;
+                const plan = num(idx.plan1 !== undefined ? r[idx.plan1] : 0) + num(idx.plan2 !== undefined ? r[idx.plan2] : 0);
+                if (plan <= 0) continue;
+                rows.push({
+                    date: curDate, wo: String(r[idx.wo] ?? '').trim(), batch, part,
+                    desc: String(r[idx.desc] ?? '').trim().slice(0, 30),
+                    mo: num(idx.mo !== undefined ? r[idx.mo] : 0),
+                    plan, rate: num(idx.rate !== undefined ? r[idx.rate] : 0)
+                });
+            }
+            return rows.length ? rows : null;
+        }
+
+        function fzImport(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                let wb;
+                try { wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false }); }
+                catch (err) { alert('讀檔失敗：' + err.message); return; }
+                const lines = [];
+                wb.SheetNames.forEach(n => {
+                    if (FZ_SKIP_SHEET(n)) return;
+                    const rows = fzParseSheet(fzAoa(wb, n));
+                    if (rows) lines.push({ name: n.trim(), rows });
+                });
+                if (!lines.length) { alert('沒有辨識到任何產線分頁（需含 裝配/生產日期、批次、零件編號/料號 欄位）'); return; }
+                const total = lines.reduce((s, l) => s + l.rows.length, 0);
+                if (!confirm(`辨識到 ${lines.length} 個產線分頁：\n${lines.map(l => `・${l.name}（${l.rows.length} 筆排程）`).join('\n')}\n\n將【整批覆蓋】現有 Frozen 排程（已填的完成量會保留），確定？`)) return;
+                fzPlan = { updatedAt: new Date().toLocaleString('zh-TW'), lines };
+                localStorage.setItem('fzPlan', JSON.stringify(fzPlan));
+                if (db) db.ref('toolbox/frozen/plan').set(fzPlan);
+                if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines[0].name;
+                fzRenderAll();
+                alert(`已匯入 ${lines.length} 個產線、${total} 筆排程`);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ===== 彙總計算 =====
+        // 回傳該產線的批次列表：{batch,part,wo,desc,mo,planTotal,first,last,due(<=基準日應完成),done(累計<=基準日),rate}
+        function fzAggregate(line, baseDs) {
+            const map = {};
+            (line.rows || []).forEach(r => {
+                const key = r.batch + '|' + r.part;
+                const a = map[key] = map[key] || { batch: r.batch, part: r.part, wo: r.wo, desc: r.desc, mo: 0, planTotal: 0, due: 0, first: '', last: '', rate: 0 };
+                a.planTotal += r.plan;
+                if (r.mo > a.mo) a.mo = r.mo;
+                if (r.rate > a.rate) a.rate = r.rate;
+                if (r.wo && !a.wo) a.wo = r.wo;
+                if (r.date) {
+                    if (!a.first || r.date < a.first) a.first = r.date;
+                    if (r.date > a.last) a.last = r.date;
+                    if (r.date <= baseDs) a.due += r.plan;
+                }
+            });
+            const doneLine = fzDone[san(line.name)] || {};
+            return Object.values(map).map(a => {
+                const rec = doneLine[san(a.batch + '|' + a.part)] || {};
+                let done = 0;
+                Object.entries(rec).forEach(([d, q]) => { if (d <= baseDs) done += num(q); });
+                a.done = done;
+                a.tail = (a.mo > 0 ? a.mo : a.planTotal) - done;
+                a.behind = a.due - done;             // 正=落後 負=超前
+                a.pct = a.due > 0 ? done / a.due : null;
+                a.behindHr = a.rate > 0 ? a.behind / a.rate : null;
+                return a;
+            }).sort((x, y) => (x.first || '9999') < (y.first || '9999') ? -1 : 1);
+        }
+
+        function fzRenderAll() {
+            const st = document.getElementById('fzStat');
+            if (!fzPlan.lines.length) { st.textContent = '尚未匯入 Frozen 表'; return; }
+            st.textContent = `Frozen 排程：${fzPlan.lines.map(l => `${l.name} ${l.rows.length} 筆`).join('・')}（更新於 ${fzPlan.updatedAt}）`;
+            document.getElementById('fzTabs').innerHTML = fzPlan.lines.map(l =>
+                `<button class="tab-btn ${l.name === fzLine ? 'active' : ''}" onclick="fzPick('${l.name.replace(/'/g, "\\'")}')">${esc(l.name)}</button>`).join('');
+            fzRender();
+        }
+        function fzPick(n) { fzLine = n; fzRenderAll(); }
+
+        function fzRender() {
+            const line = fzPlan.lines.find(l => l.name === fzLine);
+            const table = document.getElementById('fzTable');
+            if (!line) { return; }
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            const doneDs = document.getElementById('fzDoneDate').value;
+            const recent = document.getElementById('fzRecent').checked;
+            let list = fzAggregate(line, baseDs);
+            if (recent) {
+                const lo = addDays(baseDs, -14), hi = addDays(baseDs, 7);
+                list = list.filter(a => (a.first && a.first <= hi) && (a.tail > 0.01 || (a.last && a.last >= lo)));
+            }
+            // 摘要
+            const dueSum = list.reduce((s, a) => s + a.due, 0);
+            const doneSum = list.reduce((s, a) => s + a.done, 0);
+            const behindSum = dueSum - doneSum;
+            const pct = dueSum > 0 ? Math.round(doneSum / dueSum * 100) : null;
+            document.getElementById('fzSummary').innerHTML =
+                (pct != null ? `<span class="chip ${pct >= 100 ? 'green' : pct >= 90 ? 'orange' : 'red'}">達成率 ${pct}%</span>` : '') +
+                `<span class="chip info">應完成 ${Math.round(dueSum)}</span>` +
+                `<span class="chip info">已完成 ${Math.round(doneSum)}</span>` +
+                `<span class="chip ${behindSum > 0 ? 'red' : 'green'}">${behindSum > 0 ? '落後 ' + Math.round(behindSum) + ' 台' : '超前 ' + Math.round(-behindSum) + ' 台'}</span>`;
+
+            const doneLine = fzDone[san(line.name)] || {};
+            table.innerHTML =
+                `<tr><th>批次</th><th>料號</th><th>工單</th><th>MO量</th><th>排程總量</th><th>排程期間</th><th>應完成<br>(≤基準日)</th><th>累計完成</th><th>${doneDs ? esc(doneDs) : '輸入日'}<br>完成量</th><th>尾數</th><th>達成率</th><th>落後(台)</th><th>落後(時)</th></tr>` +
+                (list.length ? list.map(a => {
+                    const key = san(a.batch + '|' + a.part);
+                    const cur = doneDs ? ((doneLine[key] || {})[doneDs] ?? '') : '';
+                    const doneBatch = a.tail <= 0.01;
+                    const pctStr = a.pct == null ? '—' : Math.round(a.pct * 100) + '%';
+                    return `
+                    <tr class="${a.behind > 0.01 ? 'behind' : (doneBatch ? 'donebatch' : '')}" data-key="${esc(key)}">
+                        <td>${esc(a.batch)}</td><td>${esc(a.part)}</td><td>${esc(a.wo)}</td>
+                        <td>${a.mo || ''}</td><td>${Math.round(a.planTotal)}</td>
+                        <td>${a.first ? esc(a.first.slice(5)) + '~' + esc(a.last.slice(5)) : '—'}</td>
+                        <td>${Math.round(a.due)}</td><td>${Math.round(a.done)}</td>
+                        <td><input class="done-in ${cur !== '' ? 'filled' : ''}" type="number" min="0" value="${cur}" data-key="${esc(key)}"></td>
+                        <td class="${a.tail > 0.01 ? '' : 'pos'}">${Math.round(a.tail)}</td>
+                        <td class="${a.pct != null && a.pct < 1 ? 'neg' : (a.pct != null ? 'pos' : '')}">${pctStr}</td>
+                        <td class="${a.behind > 0.01 ? 'neg' : 'pos'}">${a.behind > 0.01 ? Math.round(a.behind) : (a.behind < -0.01 ? '超前' + Math.round(-a.behind) : 0)}</td>
+                        <td class="${a.behind > 0.01 ? 'neg' : ''}">${a.behindHr != null ? (Math.round(a.behindHr * 10) / 10) : '—'}</td>
+                    </tr>`;
+                }).join('') : `<tr><td colspan="13"><div class="empty-hint">此範圍沒有批次（可取消「只看近期批次」）</div></td></tr>`);
+        }
+
+        function fzSaveDone() {
+            const line = fzPlan.lines.find(l => l.name === fzLine);
+            if (!line) { alert('請先匯入 Frozen 表'); return; }
+            const doneDs = document.getElementById('fzDoneDate').value;
+            if (!doneDs) { alert('請先選「完成量輸入日期」（通常是昨天）'); return; }
+            const lk = san(line.name);
+            fzDone[lk] = fzDone[lk] || {};
+            let saved = 0;
+            document.querySelectorAll('#fzTable input.done-in').forEach(inp => {
+                const key = inp.dataset.key;
+                const v = inp.value.trim();
+                fzDone[lk][key] = fzDone[lk][key] || {};
+                if (v === '') { delete fzDone[lk][key][doneDs]; }
+                else { fzDone[lk][key][doneDs] = num(v); saved++; }
+                if (!Object.keys(fzDone[lk][key]).length) delete fzDone[lk][key];
+            });
+            localStorage.setItem('fzDone', JSON.stringify(fzDone));
+            if (db) db.ref('toolbox/frozen/done').set(fzDone);
+            fzRender();
+            alert(`已儲存 ${fzLine} ${doneDs} 的完成量（${saved} 筆）`);
+        }
+
+        function fzExport() {
+            if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            const wb = XLSX.utils.book_new();
+            fzPlan.lines.forEach(line => {
+                const list = fzAggregate(line, baseDs);
+                const aoa = [['批次', '料號', '工單', 'MO量', '排程總量', '排程起', '排程迄', '應完成(≤' + baseDs + ')', '累計完成', '尾數', '達成率', '落後(台)', '落後(時)']];
+                list.forEach(a => aoa.push([a.batch, a.part, a.wo, a.mo || '', Math.round(a.planTotal), a.first, a.last,
+                    Math.round(a.due), Math.round(a.done), Math.round(a.tail),
+                    a.pct == null ? '' : Math.round(a.pct * 100) + '%',
+                    Math.round(a.behind), a.behindHr != null ? Math.round(a.behindHr * 10) / 10 : '']));
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), line.name.slice(0, 28));
+            });
+            XLSX.writeFile(wb, `Frozen進度_${baseDs}.xlsx`);
+        }
+
+        // ===== 初始化 =====
+        function fzInit() {
+            document.getElementById('fzBase').value = todayStr();
+            document.getElementById('fzDoneDate').value = addDays(todayStr(), -1);
+            const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
+            if (p) fzPlan = p;
+            const d = JSON.parse(localStorage.getItem('fzDone') || 'null');
+            if (d) fzDone = d;
+            if (fzPlan.lines.length && !fzLine) fzLine = fzPlan.lines[0].name;
+            if (db) {
+                db.ref('toolbox/frozen/plan').on('value', s => {
+                    const v = s.val();
+                    if (v && v.lines) {
+                        v.lines = Array.isArray(v.lines) ? v.lines : Object.values(v.lines);
+                        v.lines.forEach(l => { l.rows = Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {}); });
+                        fzPlan = v; localStorage.setItem('fzPlan', JSON.stringify(v));
+                        if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines.length ? fzPlan.lines[0].name : '';
+                        fzRenderAll();
+                    }
+                });
+                db.ref('toolbox/frozen/done').on('value', s => {
+                    const v = s.val();
+                    if (v) { fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzRender(); }
+                });
+            }
+            fzRenderAll();
+        }
+        fzInit();
+    </script>
+</body>
+</html>
