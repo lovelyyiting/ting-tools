@@ -444,22 +444,49 @@
 
         // ===APS CORE START===
         // BOM 多階展開 → 最底階用量（每 1 台成品）
+        // 支援兩種格式：
+        // A) SAP 分段式：先列成品的第1階清單（帶用量），之後每個組件一個區段
+        //    （區段標題列＝項目/類型空白、用量空或0，其後接子件清單）
+        // B) 樹狀式：父列自帶用量、子列緊跟其後（層次+1）
         function apsExplode(rows) {
-            const n = rows.length;
-            const lv = rows.map(r => Number(r.level || 1));
-            const hasChild = new Array(n).fill(false);
-            for (let i = 0; i < n - 1; i++) if (lv[i + 1] > lv[i]) hasChild[i] = true;
-            const mult = { 0: 1 };
-            const leaf = {}, nm = {};
-            for (let i = 0; i < n; i++) {
-                const L = lv[i], q = Number(rows[i].qty || 0);
-                const eff = q * (mult[L - 1] ?? 1);
-                mult[L] = eff;
-                Object.keys(mult).forEach(k => { if (Number(k) > L) delete mult[k]; });
-                const mat = rows[i].mat;
-                if (mat) {
-                    if (rows[i].desc && !nm[mat]) nm[mat] = String(rows[i].desc);
-                    if (!hasChild[i]) leaf[mat] = (leaf[mat] || 0) + eff;
+            const nm = {};
+            rows.forEach(r => { if (r.mat && r.desc && !nm[r.mat]) nm[r.mat] = String(r.desc); });
+            const isHeader = r => r.mat && !String(r.item ?? '').trim() && !String(r.type ?? '').trim() && !(Number(r.qty) > 0);
+            const leaf = {};
+            if (rows.some(isHeader)) {
+                // 格式A：組出「組件→子件清單」對照，再從第1階清單遞迴展開
+                const root = [], sub = {};
+                let cur = null;
+                rows.forEach(r => {
+                    if (!r.mat) return;
+                    if (isHeader(r)) {
+                        cur = (sub[r.mat] && sub[r.mat].length) ? '__dup__' : r.mat; // 同組件區段重複出現只取第一次
+                        if (cur !== '__dup__') sub[cur] = [];
+                        return;
+                    }
+                    const q = Number(r.qty || 0);
+                    if (cur === null) root.push([r.mat, q]);
+                    else if (cur !== '__dup__') sub[cur].push([r.mat, q]);
+                });
+                const walk = (mat, mult, depth) => {
+                    const ch = sub[mat];
+                    if (ch && ch.length && depth < 12) ch.forEach(c => walk(c[0], mult * c[1], depth + 1));
+                    else leaf[mat] = (leaf[mat] || 0) + mult;
+                };
+                root.forEach(c => walk(c[0], c[1], 0));
+            } else {
+                // 格式B
+                const n = rows.length;
+                const lv = rows.map(r => Number(r.level || 1));
+                const hasChild = new Array(n).fill(false);
+                for (let i = 0; i < n - 1; i++) if (lv[i + 1] > lv[i]) hasChild[i] = true;
+                const mult = { 0: 1 };
+                for (let i = 0; i < n; i++) {
+                    const L = lv[i], q = Number(rows[i].qty || 0);
+                    const eff = q * (mult[L - 1] ?? 1);
+                    mult[L] = eff;
+                    Object.keys(mult).forEach(k => { if (Number(k) > L) delete mult[k]; });
+                    if (rows[i].mat && !hasChild[i]) leaf[rows[i].mat] = (leaf[rows[i].mat] || 0) + eff;
                 }
             }
             return { leaf, nm };
