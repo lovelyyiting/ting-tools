@@ -180,7 +180,7 @@
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="theme.css?v=20260706a">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
 </head>
 <body>
     <div class="container">
@@ -195,6 +195,10 @@
             <div class="section">
                 <h3>① 參數輸入</h3>
                 <div class="param-grid">
+                    <div class="field">
+                        <label>工廠別（同料號不同廠交期不同）</label>
+                        <select id="plant"></select>
+                    </div>
                     <div class="field">
                         <label>下單日期</label>
                         <input type="date" id="orderDate">
@@ -248,7 +252,7 @@
         </div>
     </div>
 
-    <script src="common.js?v=20260706a"></script>
+    <script src="common.js?v=20260706b"></script>
     <script>
         const LT_PATH = 'toolbox/quote/leadtimes';
         let ltData = { updatedAt: '', rows: [] };
@@ -256,7 +260,27 @@
 
         function buildMap() {
             ltMap = {};
-            (ltData.rows || []).forEach(r => { ltMap[String(r.mat).trim()] = num(r.days); });
+            const set = new Set();
+            (ltData.rows || []).forEach(r => {
+                const plant = String(r.plant || '').trim();
+                const mat = String(r.mat).trim();
+                ltMap[plant + '|' + mat] = num(r.days);
+                if (!plant) ltMap['|' + mat] = num(r.days);  // 舊資料無廠別
+                if (plant) set.add(plant);
+            });
+            plants = [...set].sort();
+            populatePlants();
+        }
+
+        let plants = [];
+        function populatePlants() {
+            const sel = document.getElementById('plant');
+            if (!sel) return;
+            const prev = sel.value;
+            const all = [...new Set(['AIP1', 'AIP2', 'AIP9', ...plants])];
+            sel.innerHTML = all.map(p => `<option value="${p}">${p}</option>`).join('');
+            if (prev && all.includes(prev)) sel.value = prev;
+            else sel.value = 'AIP2';
         }
 
         function initData() {
@@ -278,7 +302,7 @@
 
         function renderLtMeta() {
             document.getElementById('ltMeta').textContent =
-                `共 ${(ltData.rows || []).length} 筆料號` + (ltData.updatedAt ? `・更新於 ${ltData.updatedAt}` : '・尚未匯入');
+                `共 ${(ltData.rows || []).length} 筆` + (plants.length ? `・工廠：${plants.join('/')}` : '') + (ltData.updatedAt ? `・更新於 ${ltData.updatedAt}` : '・尚未匯入');
         }
 
         function importLt(file) {
@@ -288,11 +312,12 @@
                 if (!rows.length) { alert('檔案裡沒有資料'); return; }
                 const map = buildHeaderMap(rows[0]);
                 const parsed = rows.map(r => ({
+                    plant: String(cell(r, map, 'plant')).trim(),
                     mat: String(cell(r, map, 'mat')).trim(),
                     days: num(cell(r, map, 'ltDays'))
                 })).filter(r => r.mat);
                 if (!parsed.length) {
-                    alert('找不到可匯入的資料。\n請確認標題列包含「物料／料號」與「計劃交貨時間／交期(天)」\n（可按「⬇️ 範本」下載格式）');
+                    alert('找不到可匯入的資料。\n請確認標題列包含「工廠」「物料／料號」與「計劃交貨時間／交期(天)」\n（可按「⬇️ 範本」下載格式）');
                     return;
                 }
                 if (!confirm(`即將以 ${parsed.length} 筆【整批覆蓋】現有交期表，確定匯入？`)) return;
@@ -306,19 +331,20 @@
         }
 
         function downloadLtTpl() {
-            downloadTemplate('交期表_匯入範本.xlsx', ['物料', '計劃交貨時間'], ['2110-CP041A-044', 48]);
+            downloadTemplate('交期表_匯入範本.xlsx', ['工廠', '物料', '計劃交貨時間'], ['AIP2', '2110-CP041A-044', 48]);
         }
 
         function searchLt() {
             const kw = document.getElementById('ltSearch').value.trim();
             const box = document.getElementById('ltSearchResult');
             if (!kw) { box.textContent = ''; return; }
-            if (ltMap[kw] !== undefined) {
-                box.innerHTML = `✅ <b>${esc(kw)}</b> 的交期為 <b>${ltMap[kw]}</b> 天`;
+            const exact = (ltData.rows || []).filter(r => String(r.mat).trim() === kw);
+            if (exact.length) {
+                box.innerHTML = `✅ <b>${esc(kw)}</b>：` + exact.map(r => `${esc(r.plant || '—')} <b>${r.days}</b> 天`).join('　');
             } else {
-                const hit = (ltData.rows || []).filter(r => r.mat.includes(kw)).slice(0, 5);
+                const hit = (ltData.rows || []).filter(r => String(r.mat).includes(kw)).slice(0, 8);
                 box.innerHTML = hit.length
-                    ? '找到近似：' + hit.map(r => `${esc(r.mat)}（${r.days}天）`).join('、')
+                    ? '找到近似：' + hit.map(r => `${esc(r.plant || '')} ${esc(r.mat)}（${r.days}天）`).join('、')
                     : `❌ 交期表查無「${esc(kw)}」`;
             }
         }
@@ -337,9 +363,18 @@
             if (!parts.length) { showMsg('⚠️ 請在上方欄位至少輸入一個料號（一行一個）'); return; }
             if (!ltData.rows || !ltData.rows.length) { showMsg('⚠️ 交期表尚無資料，請先在最下方「交期表維護」匯入 Excel'); return; }
 
+            const plant = document.getElementById('plant').value;
             const detail = parts.map(p => {
-                const found = ltMap[p] !== undefined;
-                return { mat: p, days: found ? ltMap[p] : null, found };
+                let days = ltMap[plant + '|' + p];
+                let usedPlant = plant, otherPlants = [];
+                if (days === undefined) {
+                    // 該廠查無 → 找其他廠是否有此料號（提示，但不列入計算）
+                    otherPlants = (ltData.rows || []).filter(r => String(r.mat).trim() === p)
+                        .map(r => `${r.plant || '—'}:${r.days}天`);
+                    if (ltMap['|' + p] !== undefined) { days = ltMap['|' + p]; usedPlant = '無廠別'; }
+                }
+                const found = days !== undefined;
+                return { mat: p, days: found ? days : null, found, usedPlant, otherPlants };
             });
             const validDays = detail.filter(d => d.found).map(d => d.days);
             const maxDays = validDays.length ? Math.max(...validDays) : 0;
@@ -350,6 +385,7 @@
 
             // 結果卡片
             document.getElementById('resultCards').innerHTML = `
+                <div class="rcard"><div class="label">工廠別</div><div class="value">${esc(plant)}</div></div>
                 <div class="rcard"><div class="label">最長交期</div><div class="value">${maxDays} 天</div></div>
                 <div class="rcard"><div class="label">排程時間</div><div class="value">${schedule}</div></div>
                 <div class="rcard"><div class="label">可出貨時間</div><div class="value">${shipDate}</div></div>
@@ -369,14 +405,15 @@
             }
 
             document.getElementById('detailTable').innerHTML =
-                `<tr><th>#</th><th>料號</th><th>交期(天)</th></tr>` +
+                `<tr><th>#</th><th>料號</th><th>採用工廠</th><th>交期(天)</th></tr>` +
                 detail.map((d, i) => `
                 <tr class="${!d.found ? 'notfound' : (d.found && d.days === maxDays && maxDays > 0 ? 'maxrow' : '')}">
                     <td>${i + 1}</td>
                     <td>${esc(d.mat)}</td>
-                    <td>${d.found ? d.days + (d.days === maxDays && maxDays > 0 ? ' ← 最長' : '') : '⚠️ 找不到'}</td>
+                    <td>${d.found ? esc(d.usedPlant) : (d.otherPlants.length ? '此廠查無' : '—')}</td>
+                    <td>${d.found ? d.days + (d.days === maxDays && maxDays > 0 ? ' ← 最長' : '') : (d.otherPlants.length ? '⚠️ ' + esc(plant) + ' 查無（他廠：' + esc(d.otherPlants.join('、')) + '）' : '⚠️ 找不到')}</td>
                 </tr>`).join('') +
-                (notFound ? `<tr><td colspan="3" style="color:#a33">⚠️ 有 ${notFound} 個料號不在交期表中，未列入最長交期計算，請確認料號或更新交期表</td></tr>` : '');
+                (notFound ? `<tr><td colspan="4" style="color:#a33">⚠️ 有 ${notFound} 個料號在「${esc(plant)}」查無交期，未列入最長交期計算；如上表所示他廠可能有，請確認工廠別或更新交期表</td></tr>` : '');
 
             document.getElementById('resultSection').classList.remove('hidden');
             document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
