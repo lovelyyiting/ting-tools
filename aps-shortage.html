@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單排程缺料分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 1350px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+
+        .back-link {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            background: rgba(255,255,255,0.2);
+            padding: 6px 12px;
+            border-radius: 16px;
+        }
+
+        .uploads {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            padding: 16px 20px 6px;
+        }
+
+        .upcard {
+            border: 1.5px dashed #b9b19e;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 13px;
+            background: #faf8f2;
+        }
+
+        .upcard.loaded { border-style: solid; border-color: #7a8663; background: #f3f6ee; }
+        .upcard b { display: block; font-size: 14px; margin-bottom: 6px; color: #55503f; }
+        .upcard input[type=file] { width: 100%; font-size: 12px; }
+        .upcard .stat { margin-top: 6px; color: #7a8663; font-size: 12px; min-height: 16px; }
+
+        .params {
+            padding: 4px 20px 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .params summary { cursor: pointer; color: #7a8663; font-size: 13px; padding: 4px 0; }
+        .params .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 8px;
+            padding: 8px 0;
+        }
+        .params label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .params input {
+            width: 76px;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 10px 20px 14px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .run-btn {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white;
+            border: none;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .export-btn {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #555;
+        }
+
+        .summary { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px 0; }
+
+        .chip { padding: 7px 16px; border-radius: 18px; font-size: 14px; color: white; }
+        .chip.red { background: #dc3545; }
+        .chip.orange { background: #fd7e14; }
+        .chip.ok { background: #28a745; }
+        .chip.info { background: #6c757d; }
+
+        .tabs { display: flex; gap: 6px; padding: 14px 20px 0; flex-wrap: wrap; }
+
+        .tab-btn {
+            border: 1px solid #ccc;
+            background: white;
+            padding: 7px 16px;
+            border-radius: 16px;
+            font-size: 13.5px;
+            cursor: pointer;
+            color: #555;
+        }
+
+        .tab-btn.active { background: #7a8663; border-color: #7a8663; color: white; }
+
+        .filters { margin-left: auto; display: flex; gap: 6px; }
+
+        .panel { padding: 12px 20px 30px; }
+
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 72vh; overflow-y: auto; }
+
+        table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 980px; }
+
+        table.data th {
+            background: #f5f6fa;
+            padding: 8px;
+            text-align: left;
+            color: #555;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+        }
+
+        table.data td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+
+        tr.red td { background: #fff5f5; }
+        tr.orange td { background: #fff8f0; }
+        tr.info td { background: #f4f4f6; }
+
+        .lv-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            color: white;
+            white-space: nowrap;
+        }
+
+        .lv-badge.red { background: #dc3545; }
+        .lv-badge.orange { background: #fd7e14; }
+        .lv-badge.ok { background: #28a745; }
+        .lv-badge.info { background: #6c757d; }
+
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
+        .datastat { font-size: 12px; color: #999; padding: 8px 20px 0; }
+        .warnbox {
+            margin: 10px 20px 0;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: #fff3cd;
+            color: #7a5d00;
+            font-size: 13px;
+            display: none;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>🧮 訂單排程缺料分析</h1>
+            <p>上傳庫存＋採購交期＋LT＋訂單調整排程（智能1/智能2）→ 展 BOM 扣庫存 → 對 PO 交期與今日下單 LT，自動出警訊</p>
+        </div>
+
+        <div class="uploads">
+            <div class="upcard" id="upInv">
+                <b>① 庫存（SAP 匯出）</b>
+                <input type="file" accept=".xlsx,.xls" onchange="apsLoadFile(this,'inv')">
+                <div class="stat" id="statInv">欄位：物料／未限制（同料號多儲位自動加總）</div>
+            </div>
+            <div class="upcard" id="upPo">
+                <b>② 採購單交期</b>
+                <input type="file" accept=".xlsx,.xls" onchange="apsLoadFile(this,'po')">
+                <div class="stat" id="statPo">到貨日用「統計相關交貨日期」，只算發貨通知／採購單／生產訂單</div>
+            </div>
+            <div class="upcard" id="upLt">
+                <b>③ 基本交期 LT</b>
+                <input type="file" accept=".xlsx,.xls" onchange="apsLoadFile(this,'lt')">
+                <div class="stat" id="statLt">欄位：物料／計劃交貨時間（多工廠取最長）</div>
+            </div>
+            <div class="upcard" id="upOrd">
+                <b>④ 訂單調整排程（含智能1/智能2 分頁）</b>
+                <input type="file" accept=".xlsx,.xls" onchange="apsLoadFile(this,'ord')">
+                <div class="stat" id="statOrd">自動抓最新「智能-1 排程NNNN」「智能-2 排程NNNN」分頁</div>
+            </div>
+        </div>
+
+        <details class="params">
+            <summary>⚙️ 進階設定（起算批次、欄位位置）</summary>
+            <div class="grid">
+                <label>智能1 起算批次 <input id="pStart1" value="No.109"></label>
+                <label>智能2 起算批次 <input id="pStart2" value="No.108"></label>
+                <label>起算車種關鍵字 <input id="pVeh" value="SC2"></label>
+                <label>智能1 開始日欄 <input id="pDate1" value="T"></label>
+                <label>智能1 數量欄 <input id="pQty1" value="N"></label>
+                <label>智能2 開始日欄 <input id="pDate2" value="S"></label>
+                <label>智能2 數量欄 <input id="pQty2" value="M"></label>
+            </div>
+            <div style="font-size:12px;color:#999;">排程分頁固定：F=成品料號、G=批次、H=車種；資料從第 3 列開始。兩線共用同一份庫存，依開始日先扣。</div>
+        </details>
+
+        <div class="toolbar">
+            <button class="run-btn" id="runBtn" onclick="apsRun()" disabled>🔍 開始分析</button>
+            <button class="export-btn" onclick="apsExport()">⬇️ 匯出結果 Excel</button>
+            <span id="bomStat" style="font-size:12px;color:#999;"></span>
+        </div>
+
+        <div class="warnbox" id="warnBox"></div>
+        <div class="datastat" id="dataStat"></div>
+        <div class="summary" id="summary"></div>
+
+        <div class="tabs" id="tabs" style="display:none;">
+            <button class="tab-btn active" data-t="batch" onclick="apsSetTab('batch')">批次風險總表</button>
+            <button class="tab-btn" data-t="mat" onclick="apsSetTab('mat')">物料缺料彙總</button>
+            <button class="tab-btn" data-t="detail" onclick="apsSetTab('detail')">缺料明細</button>
+            <div class="filters" id="detailFilters" style="display:none;">
+                <button class="tab-btn active" data-f="red" onclick="apsSetFilter('red')">只看紅燈</button>
+                <button class="tab-btn" data-f="all" onclick="apsSetFilter('all')">紅＋橘全部</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="resultTable"><tr><td><div class="empty-hint">請上傳 4 個檔案後按「開始分析」。BOM 用雲端「物料資料管理 → 車種BOM」的資料。</div></td></tr></table>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706b"></script>
+    <script>
+        // ===== 狀態 =====
+        const apsData = { inv: null, po: null, lt: null, ord: null, models: null };
+        let apsResult = null;
+        let apsTab = 'batch';
+        let apsFilter = 'red';
+        const LV_NAME = { red: '🔴無法滿足', orange: '🟠需注意', ok: '🟢可滿足', info: 'ℹ️資料不足' };
+        const SUPPLY_KEEP = ['發貨通知', '採購單項目', '生產訂單'];
+
+        // ===== 載入雲端 BOM =====
+        async function apsLoadBom() {
+            if (!db) { document.getElementById('bomStat').textContent = 'BOM：離線無法讀取雲端'; return; }
+            try {
+                const snap = await db.ref('toolbox/bom').get();
+                const v = snap.val() || {};
+                apsData.models = Array.isArray(v.models) ? v.models : Object.values(v.models || {});
+                document.getElementById('bomStat').textContent =
+                    `雲端BOM：${apsData.models.length} 個車種` + (v.updatedAt ? `（更新於 ${v.updatedAt}）` : '');
+            } catch (e) {
+                document.getElementById('bomStat').textContent = 'BOM 讀取失敗：' + e.message;
+            }
+            apsCheckReady();
+        }
+
+        // ===== 檔案上傳 =====
+        function apsLoadFile(input, kind) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
+                    apsParse(kind, wb);
+                } catch (err) {
+                    alert('讀檔失敗：' + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function apsAoa(wb, sheetName) {
+            return XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: null });
+        }
+
+        // 在標題列找欄位（完全比對，前 5 列內找標題列）
+        function apsFindHeader(aoa, mustHave) {
+            for (let r = 0; r < Math.min(5, aoa.length); r++) {
+                const row = (aoa[r] || []).map(v => String(v ?? '').trim());
+                if (mustHave.every(h => row.includes(h))) {
+                    const idx = {};
+                    row.forEach((h, i) => { if (h && idx[h] === undefined) idx[h] = i; });
+                    return { headerRow: r, idx };
+                }
+            }
+            return null;
+        }
+
+        function apsParse(kind, wb) {
+            if (kind === 'inv') {
+                const aoa = apsAoa(wb, wb.SheetNames[0]);
+                const h = apsFindHeader(aoa, ['物料', '未限制']);
+                if (!h) { alert('庫存檔找不到「物料／未限制」標題列'); return; }
+                const inv = {}, nm = {};
+                for (let r = h.headerRow + 1; r < aoa.length; r++) {
+                    const row = aoa[r] || [];
+                    const mat = String(row[h.idx['物料']] ?? '').trim();
+                    if (!mat) continue;
+                    inv[mat] = (inv[mat] || 0) + num(row[h.idx['未限制']]);
+                    const n = row[h.idx['物料說明']];
+                    if (n && !nm[mat]) nm[mat] = String(n);
+                }
+                apsData.inv = { inv, nm };
+                apsMark('Inv', `已讀入 ${Object.keys(inv).length} 個料號`);
+            }
+            if (kind === 'po') {
+                const aoa = apsAoa(wb, wb.SheetNames[0]);
+                const h = apsFindHeader(aoa, ['產品/物料', '供應數量', 'MRP元素描述']);
+                if (!h) { alert('採購交期檔找不到「產品/物料／供應數量／MRP元素描述」標題列'); return; }
+                const po = {};
+                let lines = 0;
+                for (let r = h.headerRow + 1; r < aoa.length; r++) {
+                    const row = aoa[r] || [];
+                    const mat = String(row[h.idx['產品/物料']] ?? '').trim();
+                    if (!mat) continue;
+                    const elem = String(row[h.idx['MRP元素描述']] ?? '').trim();
+                    if (!SUPPLY_KEEP.includes(elem)) continue;
+                    const q = num(row[h.idx['供應數量']]);
+                    if (q <= 0) continue;
+                    const d = parseDateCell(row[h.idx['統計相關交貨日期']]) || parseDateCell(row[h.idx['供應日期']]);
+                    (po[mat] = po[mat] || []).push({ date: d, qty: q, remain: q });
+                    lines++;
+                }
+                Object.values(po).forEach(l => l.sort((a, b) => ((a.date || '9999') < (b.date || '9999') ? -1 : 1)));
+                apsData.po = po;
+                apsMark('Po', `已讀入 ${Object.keys(po).length} 個料號、${lines} 筆供應`);
+            }
+            if (kind === 'lt') {
+                const aoa = apsAoa(wb, wb.SheetNames[0]);
+                const h = apsFindHeader(aoa, ['物料', '計劃交貨時間']);
+                if (!h) { alert('LT 檔找不到「物料／計劃交貨時間」標題列'); return; }
+                const lt = {};
+                for (let r = h.headerRow + 1; r < aoa.length; r++) {
+                    const row = aoa[r] || [];
+                    const mat = String(row[h.idx['物料']] ?? '').trim();
+                    if (!mat) continue;
+                    const d = num(row[h.idx['計劃交貨時間']]);
+                    lt[mat] = Math.max(lt[mat] ?? 0, d);
+                }
+                apsData.lt = lt;
+                apsMark('Lt', `已讀入 ${Object.keys(lt).length} 個料號`);
+            }
+            if (kind === 'ord') {
+                // 自動抓最新的「智能-1 排程NNNN」「智能-2 排程NNNN」
+                const pick = prefix => {
+                    let best = null, bestN = -1;
+                    wb.SheetNames.forEach(n => {
+                        const m = n.match(new RegExp('^' + prefix + '\\s*排程(\\d+)$'));
+                        if (m && Number(m[1]) > bestN) { bestN = Number(m[1]); best = n; }
+                    });
+                    return best;
+                };
+                const s1 = pick('智能-1'), s2 = pick('智能-2');
+                if (!s1 || !s2) { alert('找不到「智能-1 排程NNNN」或「智能-2 排程NNNN」分頁'); return; }
+                apsData.ord = { s1, s2, aoa1: apsAoa(wb, s1), aoa2: apsAoa(wb, s2) };
+                apsMark('Ord', `用分頁「${s1}」＋「${s2}」`);
+            }
+            apsCheckReady();
+        }
+
+        function apsMark(id, text) {
+            document.getElementById('stat' + id).textContent = '✅ ' + text;
+            document.getElementById('up' + id.replace('Inv','Inv').replace('Po','Po').replace('Lt','Lt').replace('Ord','Ord')).classList.add('loaded');
+        }
+
+        function apsCheckReady() {
+            const ok = apsData.inv && apsData.po && apsData.lt && apsData.ord && apsData.models && apsData.models.length;
+            document.getElementById('runBtn').disabled = !ok;
+        }
+
+        // ===== 排程分頁 → 需求清單 =====
+        function apsIsProduct(p) {
+            if (!p) return false;
+            p = String(p).trim();
+            if (p.length < 10 || !/^\d/.test(p)) return false;
+            return !['調整', '計畫', '空計', '重工'].some(k => p.includes(k));
+        }
+
+        function apsDemands(aoa, line, dateCol, qtyCol, startKey, vehKey) {
+            const cF = 5, cG = 6, cH = 7; // F成品 G批次 H車種
+            const cD = XLSX.utils.decode_col(dateCol.trim().toUpperCase());
+            const cQ = XLSX.utils.decode_col(qtyCol.trim().toUpperCase());
+            const out = [];
+            let started = !startKey;
+            for (let r = 2; r < aoa.length; r++) { // 第 3 列起
+                const row = aoa[r] || [];
+                const part = String(row[cF] ?? '').trim();
+                const batch = String(row[cG] ?? '').trim();
+                const veh = String(row[cH] ?? '').trim();
+                if (!started) {
+                    if (veh.includes(vehKey) && batch.includes(startKey)) started = true;
+                    else continue;
+                }
+                if (!apsIsProduct(part)) continue;
+                const qty = num(row[cQ]);
+                if (!qty) continue;
+                out.push({ line, batch: batch || '(無批號)', veh, part, qty, need: parseDateCell(row[cD]) });
+            }
+            return out;
+        }
+
+        // ===APS CORE START===
+        // BOM 多階展開 → 最底階用量（每 1 台成品）
+        function apsExplode(rows) {
+            const n = rows.length;
+            const lv = rows.map(r => Number(r.level || 1));
+            const hasChild = new Array(n).fill(false);
+            for (let i = 0; i < n - 1; i++) if (lv[i + 1] > lv[i]) hasChild[i] = true;
+            const mult = { 0: 1 };
+            const leaf = {}, nm = {};
+            for (let i = 0; i < n; i++) {
+                const L = lv[i], q = Number(rows[i].qty || 0);
+                const eff = q * (mult[L - 1] ?? 1);
+                mult[L] = eff;
+                Object.keys(mult).forEach(k => { if (Number(k) > L) delete mult[k]; });
+                const mat = rows[i].mat;
+                if (mat) {
+                    if (rows[i].desc && !nm[mat]) nm[mat] = String(rows[i].desc);
+                    if (!hasChild[i]) leaf[mat] = (leaf[mat] || 0) + eff;
+                }
+            }
+            return { leaf, nm };
+        }
+
+        // 主分析：共用庫存、依開工日先扣；PO 依到貨日；缺料時用今日+LT 判斷
+        function apsAnalyzeCore(input) {
+            const { demands, inv, nm, lt, po, models, today } = input;
+            const LVR = { ok: 0, orange: 1, red: 2 };
+            const KIND_ORD = { '採購件': 0, '查無交期': 1, '自製件': 2 };
+
+            const partBom = {}, bomName = {};
+            models.forEach(m => {
+                const rows = Array.isArray(m.rows) ? m.rows : Object.values(m.rows || {});
+                const ex = apsExplode(rows);
+                partBom[m.part] = ex.leaf;
+                Object.entries(ex.nm).forEach(([k, v]) => { if (!bomName[k]) bomName[k] = v; });
+            });
+
+            const invMap = {};
+            Object.entries(inv).forEach(([k, v]) => invMap[k] = Number(v));
+            const INV0 = { ...invMap };
+            const poMap = {};
+            Object.entries(po).forEach(([m, lst]) => {
+                poMap[m] = lst.map(x => ({ date: x.date || '', qty: x.qty, remain: x.qty }));
+                poMap[m].sort((a, b) => ((a.date || '9999') < (b.date || '9999') ? -1 : 1));
+            });
+            const poTot = {};
+            Object.entries(po).forEach(([m, lst]) => poTot[m] = lst.reduce((s, x) => s + x.qty, 0));
+
+            const list = [...demands].sort((a, b) => {
+                const ka = (a.need || '9999') + a.line + a.batch, kb = (b.need || '9999') + b.line + b.batch;
+                return ka < kb ? -1 : 1;
+            });
+
+            const detail = [], batches = [], matAgg = {}, nobom = {};
+
+            list.forEach(o => {
+                const leaf = partBom[o.part];
+                const base = { line: o.line, batch: o.batch, veh: o.veh, part: o.part, need: o.need, qty: o.qty };
+                if (!leaf) {
+                    nobom[o.part] = (nobom[o.part] || 0) + 1;
+                    batches.push({ ...base, red: 0, orange: 0, ok: 0, status: 'info', top: '查無BOM' });
+                    return;
+                }
+                let red = 0, orange = 0, okc = 0;
+                const probs = [];
+                Object.entries(leaf).forEach(([mat, usage]) => {
+                    const neednum = o.qty * usage;
+                    let short = neednum, fromInv = 0, fromPo = 0;
+                    if ((invMap[mat] || 0) > 0) {
+                        fromInv = Math.min(invMap[mat], short);
+                        invMap[mat] -= fromInv; short -= fromInv;
+                    }
+                    for (const p of (poMap[mat] || [])) {
+                        if (short <= 0) break;
+                        if (p.remain <= 0) continue;
+                        if (o.need && p.date && p.date > o.need) continue; // 到貨晚於開工日不算準時
+                        const take = Math.min(p.remain, short);
+                        p.remain -= take; short -= take; fromPo += take;
+                    }
+                    let laterPO = '';
+                    for (const p of (poMap[mat] || [])) {
+                        if (p.remain > 0 && p.date && (!o.need || p.date > o.need)) { laterPO = p.date; break; }
+                    }
+                    const pastdue = (poMap[mat] || []).filter(p => p.remain > 0 && p.date && p.date < today).map(p => p.date);
+                    const hasLt = Object.prototype.hasOwnProperty.call(lt, mat);
+                    const ltd = hasLt ? Number(lt[mat]) : null;
+                    const eta = hasLt ? addDays(today, ltd) : '';
+                    const kind = !hasLt ? '查無交期' : (ltd === 0 ? '自製件' : '採購件');
+
+                    let lvl = 'ok', msg = '庫存/PO可如期滿足';
+                    if (short <= 0.0001) {
+                        if (pastdue.length) {
+                            lvl = 'orange';
+                            msg = '已用PO抵掉，但有逾期未入庫PO(' + pastdue.slice(0, 2).join('、') + ')，請追蹤廠商';
+                        }
+                    } else {
+                        const parts = ['缺' + Math.round(short)];
+                        if (laterPO) parts.push('有PO但到貨' + laterPO + '晚於開工日');
+                        if (!(Number(INV0[mat] || 0) > 0 || (poMap[mat] || []).length > 0)) parts.push('無庫存無PO(尚未採購)');
+                        if (!hasLt) {
+                            lvl = 'red'; parts.push('查無基本交期LT，無法評估');
+                        } else if (ltd === 0) {
+                            if (o.need && o.need < today) { lvl = 'red'; parts.push('自製件(LT0)但開工日' + o.need + '已過、尚未備妥，請立即補製'); }
+                            else { lvl = 'orange'; parts.push('自製件(LT0)，今日投產即可備妥'); }
+                        } else {
+                            parts.push('今日下單LT' + ltd + '天→' + eta);
+                            if (o.need && eta > o.need) { lvl = 'red'; parts.push('採購交期趕不上開工日' + o.need); }
+                            else { lvl = 'orange'; parts.push(o.need ? '今日下單來得及' : '請盡快下單'); }
+                        }
+                        if (pastdue.length) parts.push('另有逾期未入庫PO');
+                        msg = parts.join('；');
+                    }
+                    if (lvl === 'red') red++;
+                    else if (lvl === 'orange') orange++;
+                    else okc++;
+                    const a = matAgg[mat] = matAgg[mat] || { need: 0, worst: 'ok', batches: {}, kind };
+                    a.need += neednum; a.batches[o.batch] = 1; a.kind = kind;
+                    if (LVR[lvl] > LVR[a.worst]) a.worst = lvl;
+                    if (lvl !== 'ok') {
+                        probs.push({ lvl, mat, short, kind });
+                        detail.push({
+                            lvl, line: o.line, batch: o.batch, veh: o.veh, part: o.part, need: o.need,
+                            mat, name: nm[mat] || bomName[mat] || '', kind,
+                            neednum: Math.round(neednum * 10) / 10, inv: Math.round(fromInv * 10) / 10,
+                            po: Math.round(fromPo * 10) / 10, short: Math.round(short * 10) / 10,
+                            later: laterPO, lt: hasLt ? ltd : '', eta, msg
+                        });
+                    }
+                });
+                probs.sort((a, b) => (LVR[b.lvl] - LVR[a.lvl]) || (KIND_ORD[a.kind] - KIND_ORD[b.kind]) || (b.short - a.short));
+                batches.push({
+                    ...base, red, orange, ok: okc,
+                    status: red ? 'red' : (orange ? 'orange' : 'ok'),
+                    top: probs.slice(0, 3).map(p => p.mat + '(' + p.kind + '缺' + Math.round(p.short) + ')').join('、') || '—'
+                });
+            });
+
+            Object.entries(matAgg).forEach(([mat, a]) => {
+                a.inv0 = Number(INV0[mat] || 0);
+                a.po = poTot[mat] || 0;
+                a.short = Math.max(0, a.need - a.inv0 - a.po);
+                a.lt = Object.prototype.hasOwnProperty.call(lt, mat) ? Number(lt[mat]) : null;
+                a.eta = a.lt !== null ? addDays(today, a.lt) : '';
+                a.name = nm[mat] || bomName[mat] || '';
+                a.nBatch = Object.keys(a.batches).length;
+            });
+            return { detail, batches, matAgg, nobom };
+        }
+        // ===APS CORE END===
+
+        // ===== 執行 =====
+        function apsRun() {
+            const p = id => document.getElementById(id).value.trim();
+            const d1 = apsDemands(apsData.ord.aoa1, '智能1', p('pDate1'), p('pQty1'), p('pStart1'), p('pVeh'));
+            const d2 = apsDemands(apsData.ord.aoa2, '智能2', p('pDate2'), p('pQty2'), p('pStart2'), p('pVeh'));
+            if (!d1.length && !d2.length) { alert('兩個排程分頁都抓不到批次，請檢查起算批次／車種關鍵字設定'); return; }
+            const today = todayStr();
+            apsResult = apsAnalyzeCore({
+                demands: [...d1, ...d2],
+                inv: apsData.inv.inv, nm: apsData.inv.nm,
+                lt: apsData.lt, po: apsData.po,
+                models: apsData.models, today
+            });
+            apsResult.today = today;
+            apsResult.n1 = d1.length; apsResult.n2 = d2.length;
+            document.getElementById('dataStat').textContent =
+                `基準日 ${today}・批次：智能1 ${d1.length}＋智能2 ${d2.length}＝${d1.length + d2.length}` +
+                `・分頁「${apsData.ord.s1}」「${apsData.ord.s2}」・共用庫存依開工日先扣・PO用統計相關交貨日期`;
+            document.getElementById('tabs').style.display = 'flex';
+            apsRender();
+        }
+
+        function apsSetTab(t) {
+            apsTab = t;
+            document.querySelectorAll('#tabs .tab-btn[data-t]').forEach(b => b.classList.toggle('active', b.dataset.t === t));
+            document.getElementById('detailFilters').style.display = t === 'detail' ? 'flex' : 'none';
+            apsRender();
+        }
+
+        function apsSetFilter(f) {
+            apsFilter = f;
+            document.querySelectorAll('#detailFilters .tab-btn[data-f]').forEach(b => b.classList.toggle('active', b.dataset.f === f));
+            apsRender();
+        }
+
+        function apsRender() {
+            if (!apsResult) return;
+            const { detail, batches, matAgg, nobom } = apsResult;
+            const rb = batches.filter(b => b.status === 'red').length;
+            const ob = batches.filter(b => b.status === 'orange').length;
+            const gb = batches.filter(b => b.status === 'ok').length;
+            const ib = batches.filter(b => b.status === 'info').length;
+            const redBuy = Object.values(matAgg).filter(a => a.worst === 'red' && a.kind === '採購件').length;
+            const redUnk = Object.values(matAgg).filter(a => a.worst === 'red' && a.kind === '查無交期').length;
+            document.getElementById('summary').innerHTML =
+                `<span class="chip red">🔴 無法如期開工 ${rb} 批</span>` +
+                `<span class="chip orange">🟠 需注意 ${ob} 批</span>` +
+                `<span class="chip ok">🟢 可滿足 ${gb} 批</span>` +
+                (ib ? `<span class="chip info">ℹ️ 查無BOM ${ib} 批</span>` : '') +
+                `<span class="chip red">★採購件趕不上 ${redBuy} 項</span>` +
+                (redUnk ? `<span class="chip info">查無LT ${redUnk} 項</span>` : '');
+
+            const wb = document.getElementById('warnBox');
+            const nb = Object.entries(nobom);
+            if (nb.length) {
+                wb.style.display = 'block';
+                wb.innerHTML = '⚠️ 查無 BOM 的成品料號（這些批次沒算到，請到「物料資料管理→車種BOM」補）：' +
+                    nb.map(([p, c]) => `<b>${esc(p)}</b>（${c} 批）`).join('、');
+            } else wb.style.display = 'none';
+
+            const table = document.getElementById('resultTable');
+            if (apsTab === 'batch') {
+                table.innerHTML =
+                    `<tr><th>狀態</th><th>產線</th><th>批次</th><th>車種</th><th>成品料號</th><th>開工日</th><th>數量</th><th>🔴</th><th>🟠</th><th>關鍵缺料(前3)</th></tr>` +
+                    batches.map(s => `
+                    <tr class="${s.status}">
+                        <td><span class="lv-badge ${s.status === 'ok' ? 'ok' : s.status}">${s.status === 'red' ? '否-缺料' : s.status === 'orange' ? '注意' : s.status === 'info' ? '查無BOM' : '可開工'}</span></td>
+                        <td>${esc(s.line)}</td><td>${esc(s.batch)}</td><td>${esc(s.veh)}</td>
+                        <td>${esc(s.part)}</td><td>${esc(s.need || '—')}</td><td>${s.qty ?? ''}</td>
+                        <td>${s.red || ''}</td><td>${s.orange || ''}</td><td>${esc(s.top)}</td>
+                    </tr>`).join('');
+            } else if (apsTab === 'mat') {
+                const rk = { red: 2, orange: 1, ok: 0 };
+                const ko = { '採購件': 0, '查無交期': 1, '自製件': 2 };
+                const rows = Object.entries(matAgg)
+                    .sort((x, y) => (rk[y[1].worst] - rk[x[1].worst]) || (ko[x[1].kind] - ko[y[1].kind]) || (y[1].short - x[1].short));
+                table.innerHTML =
+                    `<tr><th>狀態</th><th>子件料號</th><th>品名</th><th>類型</th><th>總需求</th><th>期初庫存</th><th>PO總量</th><th>淨缺口</th><th>LT天</th><th>今日下單ETA</th><th>涉及批次</th></tr>` +
+                    rows.map(([mat, a]) => `
+                    <tr class="${a.worst === 'ok' ? '' : a.worst}">
+                        <td><span class="lv-badge ${a.worst}">${LV_NAME[a.worst]}</span></td>
+                        <td>${esc(mat)}</td><td>${esc(a.name)}</td><td>${esc(a.kind)}</td>
+                        <td>${Math.round(a.need)}</td><td>${Math.round(a.inv0)}</td><td>${Math.round(a.po)}</td>
+                        <td>${a.short > 0 ? '<b style="color:#dc3545">' + Math.round(a.short) + '</b>' : 0}</td>
+                        <td>${a.lt ?? '查無'}</td><td>${esc(a.eta)}</td><td>${a.nBatch}</td>
+                    </tr>`).join('');
+            } else {
+                let rows = detail;
+                if (apsFilter === 'red') rows = detail.filter(d => d.lvl === 'red');
+                table.innerHTML =
+                    `<tr><th>狀態</th><th>產線</th><th>批次</th><th>開工日</th><th>子件料號</th><th>品名</th><th>類型</th><th>需求</th><th>庫存抵</th><th>PO準時抵</th><th>缺口</th><th>後續PO</th><th>LT</th><th>警訊說明</th></tr>` +
+                    (rows.length ? rows.map(d => `
+                    <tr class="${d.lvl}">
+                        <td><span class="lv-badge ${d.lvl}">${LV_NAME[d.lvl]}</span></td>
+                        <td>${esc(d.line)}</td><td>${esc(d.batch)}</td><td>${esc(d.need || '—')}</td>
+                        <td>${esc(d.mat)}</td><td>${esc(d.name)}</td><td>${esc(d.kind)}</td>
+                        <td>${d.neednum}</td><td>${d.inv}</td><td>${d.po}</td>
+                        <td><b style="color:#dc3545">${d.short}</b></td>
+                        <td>${esc(d.later)}</td><td>${d.lt}</td><td>${esc(d.msg)}</td>
+                    </tr>`).join('') : `<tr><td colspan="14"><div class="empty-hint">此篩選下沒有資料</div></td></tr>`);
+            }
+        }
+
+        // ===== 匯出 Excel（4 個分頁，同桌面版報表格式）=====
+        function apsExport() {
+            if (!apsResult) { alert('請先執行分析'); return; }
+            const { detail, batches, matAgg, nobom, today } = apsResult;
+            const wb = XLSX.utils.book_new();
+
+            const aoa1 = [['產線', '批次', '車種', '成品料號', '開工日', '數量', '紅燈項', '橘燈項', '可如期開工?', '關鍵缺料(前3)']];
+            batches.forEach(s => aoa1.push([s.line, s.batch, s.veh, s.part, s.need || '', s.qty ?? '',
+                s.red || 0, s.orange || 0,
+                s.status === 'red' ? '否-缺料' : s.status === 'orange' ? '注意' : s.status === 'info' ? '查無BOM' : '是', s.top]));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '批次風險總表');
+
+            const rk = { red: 2, orange: 1, ok: 0 };
+            const ko = { '採購件': 0, '查無交期': 1, '自製件': 2 };
+            const aoa2 = [['子件料號', '品名', '類型', '總需求量', '期初庫存', 'PO總量', '淨缺口', 'LT(天)', '今日下單ETA', '最嚴重狀態', '涉及批次數']];
+            Object.entries(matAgg)
+                .sort((x, y) => (rk[y[1].worst] - rk[x[1].worst]) || (ko[x[1].kind] - ko[y[1].kind]) || (y[1].short - x[1].short))
+                .forEach(([mat, a]) => aoa2.push([mat, a.name, a.kind, Math.round(a.need * 10) / 10, a.inv0, a.po,
+                    Math.round(a.short * 10) / 10, a.lt ?? '查無', a.eta, LV_NAME[a.worst], a.nBatch]));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '物料缺料彙總');
+
+            const aoa3 = [['狀態', '產線', '批次', '車種', '成品料號', '開工日', '子件料號', '品名', '類型', '需求量', '庫存扣抵', 'PO準時扣抵', '缺口', '後續PO到貨', 'LT', '今日下單ETA', '警訊說明']];
+            detail.forEach(d => aoa3.push([LV_NAME[d.lvl], d.line, d.batch, d.veh, d.part, d.need || '',
+                d.mat, d.name, d.kind, d.neednum, d.inv, d.po, d.short, d.later, d.lt, d.eta, d.msg]));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3), '缺料明細');
+
+            const aoa4 = [['成品料號', '出現批次數', '說明']];
+            Object.entries(nobom).forEach(([p, c]) => aoa4.push([p, c, '雲端BOM查無此成品，請到「物料資料管理→車種BOM」補上']));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa4), '查無BOM料號');
+
+            XLSX.writeFile(wb, `訂單排程缺料分析_${today}.xlsx`);
+        }
+
+        apsLoadBom();
+    </script>
+</body>
+</html>
