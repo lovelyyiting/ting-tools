@@ -109,7 +109,9 @@
             </div>
         </div>
         <div class="note" style="padding:0 20px 24px;">
-            說明：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。
+            說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
+            落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
+            「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。
         </div>
     </div>
 
@@ -129,7 +131,8 @@
             mo:    ['MO量', '工單數量'],
             plan1: ['實際排程量', '排程量', '排產數量'],
             plan2: ['落後/其他排程量', '落後排程量', '其他排程量', '其他排產數量', '落後排程', '其他工序排程量'],
-            rate:  ['每小時產出']
+            rate:  ['每小時產出'],
+            sec:   ['工時', '工時(秒)']
         };
         const FZ_SKIP_SHEET = n => /備案|工作表|盤點/.test(n);
         const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
@@ -176,7 +179,8 @@
                     date: curDate, wo: String(r[idx.wo] ?? '').trim(), batch, part,
                     desc: String(r[idx.desc] ?? '').trim().slice(0, 30),
                     mo: num(idx.mo !== undefined ? r[idx.mo] : 0),
-                    plan, rate: num(idx.rate !== undefined ? r[idx.rate] : 0)
+                    plan, rate: num(idx.rate !== undefined ? r[idx.rate] : 0),
+                    sec: num(idx.sec !== undefined ? r[idx.sec] : 0)
                 });
             }
             return rows.length ? rows : null;
@@ -214,10 +218,11 @@
             const map = {};
             (line.rows || []).forEach(r => {
                 const key = r.batch + '|' + r.part;
-                const a = map[key] = map[key] || { batch: r.batch, part: r.part, wo: r.wo, desc: r.desc, mo: 0, planTotal: 0, due: 0, first: '', last: '', rate: 0 };
+                const a = map[key] = map[key] || { batch: r.batch, part: r.part, wo: r.wo, desc: r.desc, mo: 0, planTotal: 0, due: 0, first: '', last: '', rate: 0, sec: 0 };
                 a.planTotal += r.plan;
                 if (r.mo > a.mo) a.mo = r.mo;
                 if (r.rate > a.rate) a.rate = r.rate;
+                if (r.sec > a.sec) a.sec = r.sec;
                 if (r.wo && !a.wo) a.wo = r.wo;
                 if (r.date) {
                     if (!a.first || r.date < a.first) a.first = r.date;
@@ -234,7 +239,10 @@
                 a.tail = (a.mo > 0 ? a.mo : a.planTotal) - done;
                 a.behind = a.due - done;             // 正=落後 負=超前
                 a.pct = a.due > 0 ? done / a.due : null;
-                a.behindHr = a.rate > 0 ? a.behind / a.rate : null;
+                // 落後時間：有「每小時產出」的線＝整條線時間；有「工時(秒/台)」的＝1人工時
+                if (a.rate > 0) { a.behindHr = a.behind / a.rate; a.hrBase = '線'; }
+                else if (a.sec > 0) { a.behindHr = a.behind * a.sec / 3600; a.hrBase = '1人'; }
+                else { a.behindHr = null; a.hrBase = ''; }
                 return a;
             }).sort((x, y) => (x.first || '9999') < (y.first || '9999') ? -1 : 1);
         }
@@ -266,11 +274,16 @@
             const doneSum = list.reduce((s, a) => s + a.done, 0);
             const behindSum = dueSum - doneSum;
             const pct = dueSum > 0 ? Math.round(doneSum / dueSum * 100) : null;
+            const lineHr = list.filter(a => a.hrBase === '線' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+            const oneHr = list.filter(a => a.hrBase === '1人' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+            const hrChip = (v, label) => Math.abs(v) < 0.05 ? '' :
+                `<span class="chip ${v > 0 ? 'red' : 'green'}">${v > 0 ? '落後' : '超前'} ${Math.round(Math.abs(v) * 10) / 10} 小時（${label}）</span>`;
             document.getElementById('fzSummary').innerHTML =
                 (pct != null ? `<span class="chip ${pct >= 100 ? 'green' : pct >= 90 ? 'orange' : 'red'}">達成率 ${pct}%</span>` : '') +
-                `<span class="chip info">應完成 ${Math.round(dueSum)}</span>` +
+                `<span class="chip info">應完成 ${Math.round(dueSum)}（截至 ${esc(baseDs)}）</span>` +
                 `<span class="chip info">已完成 ${Math.round(doneSum)}</span>` +
-                `<span class="chip ${behindSum > 0 ? 'red' : 'green'}">${behindSum > 0 ? '落後 ' + Math.round(behindSum) + ' 台' : '超前 ' + Math.round(-behindSum) + ' 台'}</span>`;
+                `<span class="chip ${behindSum > 0 ? 'red' : 'green'}">${behindSum > 0 ? '落後 ' + Math.round(behindSum) + ' 台' : '超前 ' + Math.round(-behindSum) + ' 台'}</span>` +
+                hrChip(lineHr, '整條線') + hrChip(oneHr, '1人工時');
 
             const doneLine = fzDone[san(line.name)] || {};
             table.innerHTML =
@@ -290,7 +303,7 @@
                         <td class="${a.tail > 0.01 ? '' : 'pos'}">${Math.round(a.tail)}</td>
                         <td class="${a.pct != null && a.pct < 1 ? 'neg' : (a.pct != null ? 'pos' : '')}">${pctStr}</td>
                         <td class="${a.behind > 0.01 ? 'neg' : 'pos'}">${a.behind > 0.01 ? Math.round(a.behind) : (a.behind < -0.01 ? '超前' + Math.round(-a.behind) : 0)}</td>
-                        <td class="${a.behind > 0.01 ? 'neg' : ''}">${a.behindHr != null ? (Math.round(a.behindHr * 10) / 10) : '—'}</td>
+                        <td class="${a.behind > 0.01 ? 'neg' : ''}">${a.behindHr != null ? (Math.round(a.behindHr * 10) / 10) + '(' + a.hrBase + ')' : '—'}</td>
                     </tr>`;
                 }).join('') : `<tr><td colspan="13"><div class="empty-hint">此範圍沒有批次（可取消「只看近期批次」）</div></td></tr>`);
         }
@@ -335,7 +348,8 @@
 
         // ===== 初始化 =====
         function fzInit() {
-            document.getElementById('fzBase').value = todayStr();
+            // 基準日預設昨天：每天看的是「截至昨天(含)」應完成 vs 實際完成
+            document.getElementById('fzBase').value = addDays(todayStr(), -1);
             document.getElementById('fzDoneDate').value = addDays(todayStr(), -1);
             const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
             if (p) fzPlan = p;
