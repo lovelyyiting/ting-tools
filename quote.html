@@ -82,13 +82,15 @@
             margin-bottom: 4px;
         }
 
-        .field input {
+        .field input, .field select {
             width: 100%;
             padding: 9px 10px;
             border: 1px solid #ccc;
             border-radius: 8px;
             font-size: 15px;
             font-family: inherit;
+            background: white;
+            height: 40px;
         }
 
         textarea {
@@ -201,11 +203,11 @@
                     </div>
                     <div class="field">
                         <label>下單日期</label>
-                        <input type="date" id="orderDate">
+                        <input type="date" lang="en" id="orderDate">
                     </div>
                     <div class="field">
                         <label>目標交期</label>
-                        <input type="date" id="targetDate">
+                        <input type="date" lang="en" id="targetDate">
                     </div>
                     <div class="field">
                         <label>排程緩衝（天）</label>
