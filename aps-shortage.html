@@ -247,6 +247,7 @@
         <div class="toolbar">
             <button class="run-btn" id="runBtn" onclick="apsRun()" disabled>🔍 開始分析</button>
             <button class="export-btn" onclick="apsExport()">⬇️ 匯出結果 Excel</button>
+            <a class="export-btn" href="materials.html" style="text-decoration:none;">📦 BOM 工具</a>
             <span id="bomStat" style="font-size:12px;color:#999;"></span>
         </div>
 
@@ -259,8 +260,11 @@
             <button class="tab-btn" data-t="mat" onclick="apsSetTab('mat')">物料缺料彙總</button>
             <button class="tab-btn" data-t="detail" onclick="apsSetTab('detail')">缺料明細</button>
             <div class="filters" id="detailFilters" style="display:none;">
+                <input id="detailSearch" placeholder="🔍 查料號/品名" oninput="apsRender()"
+                       style="padding:6px 10px;border:1px solid #ccc;border-radius:16px;font-size:13px;width:150px;">
                 <button class="tab-btn active" data-f="red" onclick="apsSetFilter('red')">只看紅燈</button>
-                <button class="tab-btn" data-f="all" onclick="apsSetFilter('all')">紅＋橘全部</button>
+                <button class="tab-btn" data-f="prob" onclick="apsSetFilter('prob')">紅＋橘</button>
+                <button class="tab-btn" data-f="all" onclick="apsSetFilter('all')">全部明細</button>
             </div>
         </div>
 
@@ -587,16 +591,14 @@
                     const a = matAgg[mat] = matAgg[mat] || { need: 0, worst: 'ok', batches: {}, kind };
                     a.need += neednum; a.batches[o.batch] = 1; a.kind = kind;
                     if (LVR[lvl] > LVR[a.worst]) a.worst = lvl;
-                    if (lvl !== 'ok') {
-                        probs.push({ lvl, mat, short, kind });
-                        detail.push({
-                            lvl, line: o.line, batch: o.batch, veh: o.veh, part: o.part, need: o.need,
-                            mat, name: nm[mat] || bomName[mat] || '', kind,
-                            neednum: Math.round(neednum * 10) / 10, inv: Math.round(fromInv * 10) / 10,
-                            po: Math.round(fromPo * 10) / 10, short: Math.round(short * 10) / 10,
-                            later: laterPO, lt: hasLt ? ltd : '', eta, msg
-                        });
-                    }
+                    if (lvl !== 'ok') probs.push({ lvl, mat, short, kind });
+                    detail.push({
+                        lvl, line: o.line, batch: o.batch, veh: o.veh, part: o.part, need: o.need,
+                        mat, name: nm[mat] || bomName[mat] || '', kind,
+                        neednum: Math.round(neednum * 10) / 10, inv: Math.round(fromInv * 10) / 10,
+                        po: Math.round(fromPo * 10) / 10, short: Math.round(short * 10) / 10,
+                        later: laterPO, lt: hasLt ? ltd : '', eta, msg
+                    });
                 });
                 probs.sort((a, b) => (LVR[b.lvl] - LVR[a.lvl]) || (KIND_ORD[a.kind] - KIND_ORD[b.kind]) || (b.short - a.short));
                 batches.push({
@@ -708,17 +710,23 @@
             } else {
                 let rows = detail;
                 if (apsFilter === 'red') rows = detail.filter(d => d.lvl === 'red');
+                else if (apsFilter === 'prob') rows = detail.filter(d => d.lvl !== 'ok');
+                const kw = (document.getElementById('detailSearch')?.value || '').trim().toLowerCase();
+                if (kw) rows = rows.filter(d => (d.mat + ' ' + d.name).toLowerCase().includes(kw));
+                const CAP = 3000;
                 table.innerHTML =
-                    `<tr><th>狀態</th><th>產線</th><th>批次</th><th>開工日</th><th>子件料號</th><th>品名</th><th>類型</th><th>需求</th><th>庫存抵</th><th>PO準時抵</th><th>缺口</th><th>後續PO</th><th>LT</th><th>警訊說明</th></tr>` +
-                    (rows.length ? rows.map(d => `
-                    <tr class="${d.lvl}">
+                    `<tr><th>狀態</th><th>產線</th><th>批次</th><th>開工日</th><th>子件料號</th><th>品名</th><th>類型</th><th>需求</th><th>庫存抵</th><th>PO準時抵</th><th>缺口</th><th>後續PO</th><th>LT</th><th>說明</th></tr>` +
+                    (rows.length ? rows.slice(0, CAP).map(d => `
+                    <tr class="${d.lvl === 'ok' ? '' : d.lvl}">
                         <td><span class="lv-badge ${d.lvl}">${LV_NAME[d.lvl]}</span></td>
                         <td>${esc(d.line)}</td><td>${esc(d.batch)}</td><td>${esc(d.need || '—')}</td>
                         <td>${esc(d.mat)}</td><td>${esc(d.name)}</td><td>${esc(d.kind)}</td>
                         <td>${d.neednum}</td><td>${d.inv}</td><td>${d.po}</td>
-                        <td><b style="color:#dc3545">${d.short}</b></td>
+                        <td>${d.short > 0 ? '<b style="color:#dc3545">' + d.short + '</b>' : 0}</td>
                         <td>${esc(d.later)}</td><td>${d.lt}</td><td>${esc(d.msg)}</td>
-                    </tr>`).join('') : `<tr><td colspan="14"><div class="empty-hint">此篩選下沒有資料</div></td></tr>`);
+                    </tr>`).join('') +
+                    (rows.length > CAP ? `<tr><td colspan="14" style="color:#999">…僅顯示前 ${CAP} 筆（符合共 ${rows.length} 筆），請用搜尋縮小或匯出 Excel 看全部</td></tr>` : '')
+                    : `<tr><td colspan="14"><div class="empty-hint">此篩選下沒有資料</div></td></tr>`);
             }
         }
 
@@ -743,10 +751,16 @@
                     Math.round(a.short * 10) / 10, a.lt ?? '查無', a.eta, LV_NAME[a.worst], a.nBatch]));
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '物料缺料彙總');
 
-            const aoa3 = [['狀態', '產線', '批次', '車種', '成品料號', '開工日', '子件料號', '品名', '類型', '需求量', '庫存扣抵', 'PO準時扣抵', '缺口', '後續PO到貨', 'LT', '今日下單ETA', '警訊說明']];
-            detail.forEach(d => aoa3.push([LV_NAME[d.lvl], d.line, d.batch, d.veh, d.part, d.need || '',
-                d.mat, d.name, d.kind, d.neednum, d.inv, d.po, d.short, d.later, d.lt, d.eta, d.msg]));
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3), '缺料明細');
+            const HEAD3 = ['狀態', '產線', '批次', '車種', '成品料號', '開工日', '子件料號', '品名', '類型', '需求量', '庫存扣抵', 'PO準時扣抵', '缺口', '後續PO到貨', 'LT', '今日下單ETA', '說明'];
+            const toRow = d => [LV_NAME[d.lvl], d.line, d.batch, d.veh, d.part, d.need || '',
+                d.mat, d.name, d.kind, d.neednum, d.inv, d.po, d.short, d.later, d.lt, d.eta, d.msg];
+            const aoa3 = [HEAD3];
+            detail.filter(d => d.lvl !== 'ok').forEach(d => aoa3.push(toRow(d)));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3), '缺料明細(紅橘)');
+
+            const aoa3b = [HEAD3];
+            detail.forEach(d => aoa3b.push(toRow(d)));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa3b), '展開明細(全部)');
 
             const aoa4 = [['成品料號', '出現批次數', '說明']];
             Object.entries(nobom).forEach(([p, c]) => aoa4.push([p, c, '雲端BOM查無此成品，請到「BOM」工具補上']));
