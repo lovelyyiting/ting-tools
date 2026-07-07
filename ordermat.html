@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>訂單物料計算</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container {
+            max-width: 1300px; margin: 0 auto; background: white;
+            border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white; padding: 20px; text-align: center; position: relative;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link {
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: white; text-decoration: none; font-size: 14px;
+            background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px;
+        }
+        .body { padding: 18px 20px 30px; }
+        .step { border: 1px solid #e8e8e8; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+        .step h3 { font-size: 15px; color: #55503f; margin-bottom: 10px; }
+        .imp-btn {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white;
+            border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer;
+        }
+        .run-btn {
+            background: linear-gradient(135deg, #bd8a63 0%, #a06e44 100%); color: white;
+            border: none; padding: 12px 34px; border-radius: 10px; font-size: 17px; cursor: pointer;
+        }
+        .export-btn {
+            border: 1px solid #ccc; background: white; padding: 8px 14px;
+            border-radius: 8px; font-size: 14px; cursor: pointer; color: #555;
+        }
+        .stat { font-size: 13px; color: #7a8663; margin-top: 8px; min-height: 18px; }
+        .stat.no { color: #bbb; }
+        textarea#omParts {
+            width: 100%; min-height: 84px; padding: 10px; border: 1px solid #ccc;
+            border-radius: 8px; font-size: 14px; font-family: inherit; resize: vertical;
+        }
+        .row-flex { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .hint { font-size: 12px; color: #999; margin-top: 6px; line-height: 1.6; }
+        .hidden { display: none; }
+        .run-row { text-align: center; margin: 6px 0 16px; }
+
+        .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        .chip { padding: 7px 16px; border-radius: 18px; font-size: 14px; color: white; }
+        .chip.green { background: #28a745; } .chip.orange { background: #fd7e14; }
+        .chip.red { background: #dc3545; } .chip.info { background: #6c757d; }
+        .warnbox {
+            background: #fff8e6; border: 1px solid #ffe08a; border-radius: 8px;
+            padding: 10px 14px; font-size: 13px; color: #8a6d00; margin-bottom: 12px; line-height: 1.6;
+        }
+        .parttabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .ptab {
+            border: 1px solid #ccc; background: white; padding: 7px 14px; border-radius: 16px;
+            font-size: 13px; cursor: pointer; color: #555;
+        }
+        .ptab.active { background: #7a8663; border-color: #7a8663; color: white; }
+        .ptab.red { border-color: #dc3545; } .ptab.red.active { background: #dc3545; }
+        .ptab.orange { border-color: #fd7e14; } .ptab.orange.active { background: #fd7e14; }
+
+        .parthead { font-size: 14px; color: #555; margin-bottom: 10px; line-height: 1.7; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 62vh; overflow-y: auto; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 1000px; }
+        table.data th {
+            background: #f5f6fa; padding: 8px 7px; text-align: left; color: #555;
+            white-space: nowrap; position: sticky; top: 0;
+        }
+        table.data td { padding: 6px 7px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        tr.red td { background: #fff5f5; } tr.orange td { background: #fff8f0; }
+        td.st-green { color: #28a745; font-weight: bold; }
+        td.st-orange { color: #fd7e14; font-weight: bold; }
+        td.st-red { color: #dc3545; font-weight: bold; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📦 訂單物料計算</h1>
+            <p>匯入排程＋料號交期，輸入料號與庫存，依交期先後展出每筆訂單能否滿足、待幾號到廠</p>
+        </div>
+
+        <div class="body">
+            <div class="step">
+                <h3>① 匯入排程＋交期 Excel</h3>
+                <div class="row-flex">
+                    <button class="imp-btn" onclick="document.getElementById('omFile').click()">📥 匯入 Excel</button>
+                    <input type="file" id="omFile" accept=".xlsx,.xls" class="hidden" onchange="omImport(this.files[0]); this.value='';">
+                    <span style="font-size:12px;color:#999;" id="omBomStat"></span>
+                </div>
+                <div class="stat no" id="omSchedStat">排程：尚未匯入</div>
+                <div class="stat no" id="omPoStat">料號交期：尚未匯入</div>
+                <div class="hint">一個檔可同時含「排程」分頁（原產線別／客戶／車種／批次／數量／生產日）與多張「料號交期」分頁（產品/物料／供應日期／供應數量，分頁名＝料號）。也可分兩次匯入：只有排程的檔更新排程、只有交期的檔更新交期。用量自動用雲端「BOM」的車種BOM換算（批次名對應車種）。</div>
+            </div>
+
+            <div class="step">
+                <h3>② 輸入要計算的料號＋目前庫存（可單筆可多筆）</h3>
+                <textarea id="omParts" placeholder="每行一個料號，後面接目前庫存（用空白、逗號或 Tab 分隔；沒庫存可省略或填 0）&#10;例：&#10;4230-FF1001-004 500&#10;4210-DYCS103-001,300"></textarea>
+                <div class="hint">庫存＝目前現有可用量。留空當 0。</div>
+            </div>
+
+            <div class="run-row">
+                <button class="run-btn" onclick="omRun()">🔍 計算</button>
+            </div>
+
+            <div id="omResult" class="hidden">
+                <div class="summary" id="omSummary"></div>
+                <div id="omWarn"></div>
+                <div class="parttabs" id="omPartTabs"></div>
+                <div class="parthead" id="omPartHead"></div>
+                <div class="row-flex" style="margin-bottom:10px;">
+                    <button class="export-btn" onclick="omExport()">⬇️ 匯出全部結果 Excel</button>
+                </div>
+                <div class="table-wrap"><table class="data" id="omTable"></table></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706b"></script>
+    <script>
+        let omModels = [];
+        let omSched = { updatedAt: '', rows: [] };
+        let omPo = { updatedAt: '', rows: [] };
+        let omResult = null;
+        let omPart = '';
+
+        const OM_SCHED_ALIAS = {
+            line: ['原產線別', '產線', '線別'],
+            cust: ['客戶'],
+            veh: ['車種', '車型', '機種'],
+            batch: ['批次'],
+            qty: ['數量', '排程數量', '訂單數量', 'MO量'],
+            date: ['生產日', '生產日期', '排程日', '裝配日期', '需求日期']
+        };
+        const OM_PO_ALIAS = {
+            mat: ['產品/物料', '物料', '料號', '產品', '物料號碼'],
+            qty: ['供應數量', '數量', '在途數量', '交貨數量'],
+            dateT: ['統計相關交貨日期'],
+            dateC: ['供應日期', '交期', '到貨日', '交貨日', '預計到貨日', '達交日'],
+            dateS: ['上船日'],
+            elem: ['MRP元素描述', 'MRP元素']
+        };
+        const PO_KEEP = ['發貨通知', '採購單項目', '生產訂單'];
+        const norm = s => String(s ?? '').replace(/\s/g, '');
+
+        // ===== 雲端 BOM =====
+        async function omLoadBom() {
+            if (!db) { document.getElementById('omBomStat').textContent = 'BOM：離線'; return; }
+            try {
+                const snap = await db.ref('toolbox/bom').get();
+                const v = snap.val() || {};
+                omModels = Array.isArray(v.models) ? v.models : Object.values(v.models || {});
+                document.getElementById('omBomStat').textContent = `雲端BOM：${omModels.length} 車種` + (v.updatedAt ? `（${v.updatedAt}）` : '');
+            } catch (e) { document.getElementById('omBomStat').textContent = 'BOM 讀取失敗'; }
+        }
+
+        // BOM 多階展開（支援 SAP 分段式與樹狀式）→ 最底階用量
+        function omExplode(rows) {
+            const isHeader = r => r.mat && !String(r.item ?? '').trim() && !String(r.type ?? '').trim() && !(Number(r.qty) > 0);
+            const leaf = {};
+            if (rows.some(isHeader)) {
+                const root = [], sub = {}; let cur = null;
+                rows.forEach(r => {
+                    if (!r.mat) return;
+                    if (isHeader(r)) { cur = (sub[r.mat] && sub[r.mat].length) ? '__dup__' : r.mat; if (cur !== '__dup__') sub[cur] = []; return; }
+                    const q = Number(r.qty || 0);
+                    if (cur === null) root.push([r.mat, q]); else if (cur !== '__dup__') sub[cur].push([r.mat, q]);
+                });
+                const walk = (mat, mult, d) => {
+                    const ch = sub[mat];
+                    if (ch && ch.length && d < 12) ch.forEach(c => walk(c[0], mult * c[1], d + 1));
+                    else leaf[mat] = (leaf[mat] || 0) + mult;
+                };
+                root.forEach(c => walk(c[0], c[1], 0));
+            } else {
+                const n = rows.length, lv = rows.map(r => Number(r.level || 1)), hc = new Array(n).fill(false);
+                for (let i = 0; i < n - 1; i++) if (lv[i + 1] > lv[i]) hc[i] = true;
+                const mult = { 0: 1 };
+                for (let i = 0; i < n; i++) {
+                    const L = lv[i], eff = Number(rows[i].qty || 0) * (mult[L - 1] ?? 1);
+                    mult[L] = eff; Object.keys(mult).forEach(k => { if (Number(k) > L) delete mult[k]; });
+                    if (rows[i].mat && !hc[i]) leaf[rows[i].mat] = (leaf[rows[i].mat] || 0) + eff;
+                }
+            }
+            return leaf;
+        }
+        // 批次名/車種 → BOM 車種模型（取名稱最長且被批次字串包含者）
+        function omFindModel(batch, veh) {
+            const nb = norm(batch); let best = null;
+            omModels.forEach(m => { if (nb && nb.includes(norm(m.name))) { if (!best || m.name.length > best.name.length) best = m; } });
+            if (!best && veh) { const nv = norm(veh); omModels.forEach(m => { if (norm(m.name).startsWith(nv) || nv.startsWith(norm(m.name))) { if (!best || m.name.length > best.name.length) best = m; } }); }
+            return best;
+        }
+
+        // ===== 匯入 =====
+        function omAoa(wb, name) {
+            const ws = wb.Sheets[name];
+            if (!ws || !ws['!ref']) return [];
+            const rg = XLSX.utils.decode_range(ws['!ref']);
+            rg.e.c = Math.min(rg.e.c, 30); rg.e.r = Math.min(rg.e.r, 5000);
+            return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, range: XLSX.utils.encode_range(rg) });
+        }
+        function omFindHeader(aoa, alias, must) {
+            for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+                const cells = (aoa[i] || []).map(norm);
+                const idx = {};
+                Object.entries(alias).forEach(([f, al]) => { const j = cells.findIndex(c => c && al.map(norm).includes(c)); if (j >= 0 && idx[f] === undefined) idx[f] = j; });
+                if (must.every(m => idx[m] !== undefined)) return { hRow: i, idx };
+            }
+            return null;
+        }
+        function omImport(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                let wb;
+                try { wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false }); }
+                catch (err) { alert('讀檔失敗：' + err.message); return; }
+                let schedRows = null, poRows = [];
+                let schedSheet = '', poSheets = [];
+                wb.SheetNames.forEach(n => {
+                    const aoa = omAoa(wb, n);
+                    // 試排程
+                    const sh = omFindHeader(aoa, OM_SCHED_ALIAS, ['batch', 'qty', 'date']);
+                    if (sh && !schedRows) {
+                        const rows = [];
+                        for (let i = sh.hRow + 1; i < aoa.length; i++) {
+                            const r = aoa[i] || [];
+                            const batch = String(r[sh.idx.batch] ?? '').trim();
+                            const qty = num(r[sh.idx.qty]);
+                            const date = parseDateCell(r[sh.idx.date]);
+                            if (!batch || qty <= 0 || !date) continue;
+                            rows.push({ line: sh.idx.line != null ? String(r[sh.idx.line] ?? '').trim() : '', cust: sh.idx.cust != null ? String(r[sh.idx.cust] ?? '').trim() : '', veh: sh.idx.veh != null ? String(r[sh.idx.veh] ?? '').trim() : '', batch, qty, date });
+                        }
+                        if (rows.length) { schedRows = rows; schedSheet = n; return; }
+                    }
+                    // 試 PO
+                    const ph = omFindHeader(aoa, OM_PO_ALIAS, ['mat', 'qty']);
+                    if (ph && (ph.idx.dateT != null || ph.idx.dateC != null || ph.idx.dateS != null)) {
+                        const hasElem = ph.idx.elem != null;
+                        let got = 0;
+                        for (let i = ph.hRow + 1; i < aoa.length; i++) {
+                            const r = aoa[i] || [];
+                            const mat = String(r[ph.idx.mat] ?? '').trim();
+                            if (!mat) continue;
+                            if (hasElem && !PO_KEEP.includes(String(r[ph.idx.elem] ?? '').trim())) continue;
+                            const qty = num(r[ph.idx.qty]);
+                            if (qty <= 0) continue;
+                            const date = (ph.idx.dateT != null && parseDateCell(r[ph.idx.dateT])) || (ph.idx.dateC != null && parseDateCell(r[ph.idx.dateC])) || (ph.idx.dateS != null && parseDateCell(r[ph.idx.dateS])) || '';
+                            poRows.push({ mat, qty, date });
+                            got++;
+                        }
+                        if (got) poSheets.push(n);
+                    }
+                });
+                const msgs = [];
+                if (schedRows) {
+                    omSched = { updatedAt: new Date().toLocaleString('zh-TW'), rows: schedRows };
+                    localStorage.setItem('omSched', JSON.stringify(omSched));
+                    if (db) db.ref('toolbox/ordermat/sched').set(omSched);
+                    msgs.push(`✅ 排程（分頁「${schedSheet}」）：${schedRows.length} 筆`);
+                }
+                if (poRows.length) {
+                    omPo = { updatedAt: new Date().toLocaleString('zh-TW'), rows: poRows };
+                    localStorage.setItem('omPo', JSON.stringify(omPo));
+                    if (db) db.ref('toolbox/ordermat/po').set(omPo);
+                    const mats = new Set(poRows.map(r => r.mat)).size;
+                    msgs.push(`✅ 料號交期（分頁 ${poSheets.length} 張）：${poRows.length} 筆・${mats} 個料號`);
+                }
+                omRenderStat();
+                if (!msgs.length) alert('這個檔案沒有辨識到「排程」或「料號交期」分頁。\n排程需含 批次/數量/生產日；交期需含 產品-物料/供應數量/日期。');
+                else alert('匯入完成：\n' + msgs.join('\n'));
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        function omRenderStat() {
+            const s = document.getElementById('omSchedStat'), p = document.getElementById('omPoStat');
+            if (omSched.rows.length) { s.className = 'stat'; s.textContent = `排程：${omSched.rows.length} 筆` + (omSched.updatedAt ? `・${omSched.updatedAt}` : ''); }
+            else { s.className = 'stat no'; s.textContent = '排程：尚未匯入'; }
+            if (omPo.rows.length) { const m = new Set(omPo.rows.map(r => r.mat)).size; p.className = 'stat'; p.textContent = `料號交期：${omPo.rows.length} 筆・${m} 個料號` + (omPo.updatedAt ? `・${omPo.updatedAt}` : ''); }
+            else { p.className = 'stat no'; p.textContent = '料號交期：尚未匯入'; }
+        }
+
+        // ===OM CORE START===
+        // 主計算：對每個料號，依生產日順序展開排程需求（用量取自BOM），
+        // 用「庫存＋在途(依交期)」逐筆分配，判定 滿足／待X到廠／缺料，並標示靠逾期未到PO才滿足
+        function omCompute(input) {
+            const { parts, schedule, po, models, today } = input;
+            // 用量快取：model 名 → {mat: usage}
+            const leafCache = {};
+            const usageOf = (model, mat) => {
+                if (!model) return null;
+                if (!leafCache[model.name]) leafCache[model.name] = omExplodeExt(model.rows);
+                return leafCache[model.name][mat];
+            };
+            const batches = [...schedule].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+            const poByMat = {};
+            (po || []).forEach(r => (poByMat[r.mat] = poByMat[r.mat] || []).push({ date: r.date || '', qty: num(r.qty) }));
+            Object.values(poByMat).forEach(l => l.sort((a, b) => ((a.date || '9999') < (b.date || '9999') ? -1 : 1)));
+
+            return parts.map(pt => {
+                const mat = pt.mat;
+                let invRemain = num(pt.inv);
+                const poList = (poByMat[mat] || []).map(x => ({ date: x.date, remain: x.qty }));
+                const poTotal = poList.reduce((s, x) => s + x.remain, 0);
+                let name = '', noUsageVeh = new Set(), usedVeh = new Set();
+                const rows = [];
+                let worst = 'green', firstShort = '', totalDemand = 0;
+                const RANK = { green: 0, orange: 1, red: 2 };
+
+                batches.forEach(b => {
+                    const model = findModelExt(b.batch, b.veh, models);
+                    const usage = usageOf(model, mat);
+                    if (model && !name) { const nm = model.rows.find(r => r.mat === mat && r.desc); if (nm) name = String(nm.desc).slice(0, 28); }
+                    if (usage == null || usage <= 0) {
+                        if (!model) noUsageVeh.add(b.veh || b.batch);
+                        return; // 此車種不用到這個料，不列
+                    }
+                    usedVeh.add(model.name);
+                    const demand = b.qty * usage;
+                    totalDemand += demand;
+                    let need = demand, fromInv = 0, fromPo = 0;
+                    if (invRemain > 0) { fromInv = Math.min(invRemain, need); invRemain -= fromInv; need -= fromInv; }
+                    const usedDates = [];
+                    for (const p of poList) {
+                        if (need <= 0) break;
+                        if (p.remain <= 0) continue;
+                        const take = Math.min(p.remain, need); p.remain -= take; need -= take; fromPo += take;
+                        usedDates.push({ date: p.date, qty: take });
+                    }
+                    const short = need;
+                    const coverDate = usedDates.reduce((mx, u) => (u.date > mx ? u.date : mx), '');
+                    const overdue = usedDates.filter(u => u.date && u.date < today).map(u => u.date);
+                    let cls, status, note = '';
+                    if (short > 0) {
+                        cls = 'red'; status = '缺料';
+                        note = `庫存＋全部在途仍不足，缺 ${Math.round(short)}`;
+                    } else if (coverDate && coverDate > b.date) {
+                        cls = 'orange'; status = `待 ${coverDate} 到廠`;
+                        note = `生產日 ${b.date} 前不足，需等 ${coverDate} 到貨才滿足`;
+                    } else {
+                        cls = 'green'; status = '滿足';
+                    }
+                    if (overdue.length && short <= 0) {
+                        if (cls === 'green') cls = 'orange';
+                        note = (note ? note + '；' : '') + `⚠️ 靠交期已過(${[...new Set(overdue)].join('、')})的在途才滿足，該批應到未到，請追蹤`;
+                    }
+                    if (RANK[cls] > RANK[worst]) worst = cls;
+                    if (cls === 'red' && !firstShort) firstShort = b.batch + '（' + b.date + '）';
+                    rows.push({
+                        date: b.date, line: b.line, batch: b.batch, veh: model.name, usage,
+                        demand: Math.round(demand * 100) / 100, fromInv: Math.round(fromInv * 100) / 100,
+                        fromPo: Math.round(fromPo * 100) / 100, short: Math.round(short * 100) / 100,
+                        cover: (coverDate && coverDate > b.date) ? coverDate : '', status, cls, note
+                    });
+                });
+                return {
+                    mat, name, inv: num(pt.inv), poTotal, totalDemand: Math.round(totalDemand * 100) / 100,
+                    rows, worst: rows.length ? worst : 'info', firstShort,
+                    noUsage: rows.length === 0, noUsageVeh: [...noUsageVeh]
+                };
+            });
+        }
+        // ===OM CORE END===
+
+        // 供 CORE 呼叫的外部參照（測試時會被 stub）
+        function omExplodeExt(rows) { return omExplode(rows); }
+        function findModelExt(batch, veh, models) { return omFindModel(batch, veh); }
+
+        // ===== 執行 / 顯示 =====
+        function omParseParts() {
+            const txt = document.getElementById('omParts').value;
+            const out = [];
+            txt.split(/\r?\n/).forEach(line => {
+                const t = line.trim(); if (!t) return;
+                const parts = t.split(/[\s,\t]+/);
+                const mat = parts[0].trim();
+                if (!mat) return;
+                out.push({ mat, inv: parts.length > 1 ? num(parts[1]) : 0 });
+            });
+            return out;
+        }
+        function omRun() {
+            const parts = omParseParts();
+            if (!parts.length) { alert('請先在②輸入至少一個料號'); return; }
+            if (!omSched.rows.length) { alert('請先匯入排程'); return; }
+            if (!omModels.length) { alert('雲端 BOM 尚未載入（用量算不出來），請稍候或確認網路'); return; }
+            localStorage.setItem('omPartsTxt', document.getElementById('omParts').value);
+            omResult = omCompute({ parts, schedule: omSched.rows, po: omPo.rows, models: omModels, today: todayStr() });
+            omPart = omResult[0].mat;
+            omRenderResult();
+            document.getElementById('omResult').classList.remove('hidden');
+            document.getElementById('omResult').scrollIntoView({ behavior: 'smooth' });
+        }
+        function omRenderResult() {
+            const okAll = omResult.filter(p => p.worst === 'green').length;
+            const warn = omResult.filter(p => p.worst === 'orange').length;
+            const bad = omResult.filter(p => p.worst === 'red').length;
+            const info = omResult.filter(p => p.worst === 'info').length;
+            document.getElementById('omSummary').innerHTML =
+                `<span class="chip info">共 ${omResult.length} 個料號</span>` +
+                (bad ? `<span class="chip red">🔴 有缺料 ${bad}</span>` : '') +
+                (warn ? `<span class="chip orange">🟠 需注意/待到廠 ${warn}</span>` : '') +
+                (okAll ? `<span class="chip green">🟢 全數滿足 ${okAll}</span>` : '') +
+                (info ? `<span class="chip info">ℹ️ 排程未用到 ${info}</span>` : '');
+
+            const noBom = omResult.filter(p => p.noUsage && p.noUsageVeh.length);
+            document.getElementById('omWarn').innerHTML = noBom.length
+                ? `<div class="warnbox">⚠️ 這些料號在排程車種的 BOM 查不到用量（可能該料號不用於這些車種，或雲端BOM缺該車種）：${noBom.map(p => esc(p.mat) + '（車種：' + p.noUsageVeh.map(esc).join('/') + '）').join('；')}</div>` : '';
+
+            document.getElementById('omPartTabs').innerHTML = omResult.map(p =>
+                `<button class="ptab ${p.worst === 'red' ? 'red' : p.worst === 'orange' ? 'orange' : ''} ${p.mat === omPart ? 'active' : ''}" onclick="omPickPart('${p.mat.replace(/'/g, "\\'")}')">${esc(p.mat)}${p.worst === 'red' ? ' 🔴' : p.worst === 'orange' ? ' 🟠' : ''}</button>`).join('');
+            omRenderPart();
+        }
+        function omPickPart(m) { omPart = m; document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active')); omRenderResult(); }
+        function omRenderPart() {
+            const p = omResult.find(x => x.mat === omPart);
+            if (!p) return;
+            document.getElementById('omPartHead').innerHTML =
+                `<b>${esc(p.mat)}</b> ${esc(p.name || '')}　｜　目前庫存 <b>${Math.round(p.inv)}</b>・在途總量 <b>${Math.round(p.poTotal)}</b>・排程總需求 <b>${Math.round(p.totalDemand)}</b>` +
+                (p.firstShort ? `　｜　<span style="color:#dc3545">最早缺料：${esc(p.firstShort)}</span>` : '');
+            const table = document.getElementById('omTable');
+            if (!p.rows.length) { table.innerHTML = `<tr><td><div class="empty-hint">排程車種都沒用到此料號（或查無BOM用量）</div></td></tr>`; return; }
+            table.innerHTML =
+                `<tr><th>狀態</th><th>生產日</th><th>產線</th><th>批次</th><th>車種</th><th>每台用量</th><th>需求量</th><th>庫存扣抵</th><th>在途扣抵</th><th>缺口</th><th>待到廠日</th><th>說明</th></tr>` +
+                p.rows.map(r => `
+                <tr class="${r.cls === 'green' ? '' : r.cls}">
+                    <td class="st-${r.cls}">${r.status}</td>
+                    <td>${esc(r.date)}</td><td>${esc(r.line)}</td><td>${esc(r.batch)}</td><td>${esc(r.veh)}</td>
+                    <td>${r.usage}</td><td>${r.demand}</td><td>${r.fromInv}</td><td>${r.fromPo}</td>
+                    <td>${r.short > 0 ? '<b style="color:#dc3545">' + r.short + '</b>' : 0}</td>
+                    <td>${esc(r.cover)}</td><td>${esc(r.note)}</td>
+                </tr>`).join('');
+        }
+        function omExport() {
+            if (!omResult) return;
+            const wb = XLSX.utils.book_new();
+            const head = ['料號', '品名', '狀態', '生產日', '產線', '批次', '車種', '每台用量', '需求量', '庫存扣抵', '在途扣抵', '缺口', '待到廠日', '說明'];
+            const all = [head];
+            omResult.forEach(p => p.rows.forEach(r => all.push([p.mat, p.name, r.status, r.date, r.line, r.batch, r.veh, r.usage, r.demand, r.fromInv, r.fromPo, r.short, r.cover, r.note])));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), '訂單物料計算');
+            const sum = [['料號', '品名', '庫存', '在途總量', '排程總需求', '整體狀態', '最早缺料批次']];
+            omResult.forEach(p => sum.push([p.mat, p.name, p.inv, p.poTotal, p.totalDemand,
+                p.worst === 'red' ? '有缺料' : p.worst === 'orange' ? '需注意/待到廠' : p.worst === 'info' ? '排程未用到' : '全數滿足', p.firstShort]));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '料號彙總');
+            XLSX.writeFile(wb, `訂單物料計算_${todayStr()}.xlsx`);
+        }
+
+        // ===== 初始化 =====
+        function omInit() {
+            const s = JSON.parse(localStorage.getItem('omSched') || 'null'); if (s) omSched = s;
+            const p = JSON.parse(localStorage.getItem('omPo') || 'null'); if (p) omPo = p;
+            const txt = localStorage.getItem('omPartsTxt'); if (txt) document.getElementById('omParts').value = txt;
+            if (db) {
+                db.ref('toolbox/ordermat/sched').on('value', s2 => { const v = s2.val(); if (v) { v.rows = Array.isArray(v.rows) ? v.rows : Object.values(v.rows || {}); omSched = v; localStorage.setItem('omSched', JSON.stringify(v)); omRenderStat(); } });
+                db.ref('toolbox/ordermat/po').on('value', s2 => { const v = s2.val(); if (v) { v.rows = Array.isArray(v.rows) ? v.rows : Object.values(v.rows || {}); omPo = v; localStorage.setItem('omPo', JSON.stringify(v)); omRenderStat(); } });
+            }
+            omRenderStat();
+            omLoadBom();
+        }
+        omInit();
+    </script>
+</body>
+</html>
