@@ -142,6 +142,7 @@
         <div class="board-sec" id="fzLagSec" style="display:none;">
             <div class="board-head">
                 <span style="font-weight:bold;color:#55503f;">🚨 各產線落後彙整</span>
+                <button class="export-btn" onclick="fzLagExport()">⬇️ 匯出落後彙整</button>
                 <span id="fzLagHint" style="font-size:12px;color:#999;"></span>
             </div>
             <div class="table-wrap" style="max-height:50vh;margin-bottom:14px;">
@@ -385,6 +386,36 @@
             });
             table.innerHTML = any ? html : head + `<tr><td colspan="10"><div class="empty-hint">目前沒有落後批次 🎉</div></td></tr>`;
         }
+        // 組落後彙整的匯出資料（含各線小計列）
+        function fzLagAoa(baseDs, withSub) {
+            const aoa = [['產線', '批次', '料號', '工單', '應完成(≤' + baseDs + ')', '累計完成', '落後(台)', '落後(時)', '出貨日', '缺料狀況']];
+            fzPlan.lines.forEach(line => {
+                const lk = san(line.name);
+                const rows = fzAggregate(line, baseDs).filter(a => a.behind > 0.01);
+                if (!rows.length) return;
+                let subQty = 0, subLineHr = 0, subOneHr = 0;
+                rows.forEach(a => {
+                    const meta = (fzMeta[lk] || {})[san(a.batch + '|' + a.part)] || {};
+                    subQty += a.behind;
+                    if (a.hrBase === '線' && a.behindHr != null) subLineHr += a.behindHr;
+                    if (a.hrBase === '1人' && a.behindHr != null) subOneHr += a.behindHr;
+                    aoa.push([line.name, a.batch, a.part, a.wo, Math.round(a.due), Math.round(a.done),
+                        Math.round(a.behind), a.behindHr != null ? Math.round(a.behindHr * 10) / 10 : '',
+                        meta.ship || '', meta.short || '']);
+                });
+                if (withSub) aoa.push([line.name + ' 小計', '', '', '', '', '', Math.round(subQty), fzHrText(subLineHr, subOneHr), '', '']);
+            });
+            return aoa;
+        }
+        function fzLagExport() {
+            if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            const aoa = fzLagAoa(baseDs, true);
+            if (aoa.length <= 1) { alert('目前沒有落後批次 🎉'); return; }
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '落後彙整');
+            XLSX.writeFile(wb, `落後彙整_${baseDs}.xlsx`);
+        }
         function fzSetMeta(lk, key, f, val) {
             val = String(val || '').trim();
             fzMeta[lk] = fzMeta[lk] || {}; fzMeta[lk][key] = fzMeta[lk][key] || {};
@@ -475,17 +506,8 @@
             if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
             const baseDs = document.getElementById('fzBase').value || todayStr();
             const wb = XLSX.utils.book_new();
-            // 第一頁：各產線落後彙整（含出貨日、缺料）
-            const lagAoa = [['產線', '批次', '料號', '工單', '應完成(≤' + baseDs + ')', '累計完成', '落後(台)', '落後(時)', '出貨日', '缺料狀況']];
-            fzPlan.lines.forEach(line => {
-                const lk = san(line.name);
-                fzAggregate(line, baseDs).filter(a => a.behind > 0.01).forEach(a => {
-                    const meta = (fzMeta[lk] || {})[san(a.batch + '|' + a.part)] || {};
-                    lagAoa.push([line.name, a.batch, a.part, a.wo, Math.round(a.due), Math.round(a.done),
-                        Math.round(a.behind), a.behindHr != null ? Math.round(a.behindHr * 10) / 10 : '',
-                        meta.ship || '', meta.short || '']);
-                });
-            });
+            // 第一頁：各產線落後彙整（含出貨日、缺料、各線小計）
+            const lagAoa = fzLagAoa(baseDs, true);
             if (lagAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lagAoa), '落後彙整');
             fzPlan.lines.forEach(line => {
                 const list = fzAggregate(line, baseDs);
