@@ -77,6 +77,28 @@
         .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
         .note { font-size: 12px; color: #999; padding: 10px 20px 0; line-height: 1.7; }
         .hidden { display: none; }
+        /* 達成率看板 */
+        .board-sec { padding: 14px 20px 4px; border-bottom: 1px solid #eee; }
+        .board-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; font-size: 14px; }
+        .board-head label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .board-head input[type=date] { padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+        .board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; padding-bottom: 14px; }
+        .bd-card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px 14px; cursor: pointer; border-left: 6px solid #ccc; background: #fffdf9; }
+        .bd-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.12); }
+        .bd-card.green { border-left-color: #28a745; }
+        .bd-card.orange { border-left-color: #fd7e14; }
+        .bd-card.red { border-left-color: #dc3545; }
+        .bd-card.gray { border-left-color: #ccc; }
+        .bd-line { font-size: 14px; font-weight: bold; color: #55503f; margin-bottom: 4px; }
+        .bd-pct { font-size: 30px; font-weight: bold; line-height: 1.1; }
+        .bd-pct.green { color: #28a745; }
+        .bd-pct.orange { color: #fd7e14; }
+        .bd-pct.red { color: #dc3545; }
+        .bd-pct.gray { color: #aaa; }
+        .bd-sub { font-size: 12.5px; color: #777; margin-top: 6px; line-height: 1.6; }
+        .bd-behind { font-weight: bold; }
+        .bd-behind.neg { color: #dc3545; }
+        .bd-behind.pos { color: #28a745; }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -101,6 +123,23 @@
         </div>
 
         <div class="planstat" id="fzStat">尚未匯入 Frozen 表</div>
+
+        <div class="board-sec" id="fzBoardSec" style="display:none;">
+            <div class="board-head">
+                <span style="font-weight:bold;color:#55503f;">📊 達成率看板</span>
+                <span class="board-modes" style="display:flex;gap:6px;">
+                    <button class="tab-btn active" data-m="day" onclick="fzSetMode('day')">當天</button>
+                    <button class="tab-btn" data-m="month" onclick="fzSetMode('month')">當月</button>
+                    <button class="tab-btn" data-m="range" onclick="fzSetMode('range')">自訂區間</button>
+                </span>
+                <label id="fzDayWrap">日期 <input type="date" id="fzDay" onchange="fzBoard()"></label>
+                <label id="fzFromWrap" class="hidden">從 <input type="date" id="fzFrom" onchange="fzBoard()"></label>
+                <label id="fzToWrap" class="hidden">到 <input type="date" id="fzTo" onchange="fzBoard()"></label>
+                <span id="fzRangeHint" style="font-size:12px;color:#999;"></span>
+            </div>
+            <div class="board-grid" id="fzBoard"></div>
+        </div>
+
         <div class="tabs" id="fzTabs"></div>
         <div class="summary" id="fzSummary"></div>
         <div class="panel">
@@ -251,11 +290,57 @@
             const st = document.getElementById('fzStat');
             if (!fzPlan.lines.length) { st.textContent = '尚未匯入 Frozen 表'; return; }
             st.textContent = `Frozen 排程：${fzPlan.lines.map(l => `${l.name} ${l.rows.length} 筆`).join('・')}（更新於 ${fzPlan.updatedAt}）`;
+            document.getElementById('fzBoardSec').style.display = '';
             document.getElementById('fzTabs').innerHTML = fzPlan.lines.map(l =>
                 `<button class="tab-btn ${l.name === fzLine ? 'active' : ''}" onclick="fzPick('${l.name.replace(/'/g, "\\'")}')">${esc(l.name)}</button>`).join('');
+            fzBoard();
             fzRender();
         }
         function fzPick(n) { fzLine = n; fzRenderAll(); }
+
+        // ===== 達成率看板（當天／當月／自訂區間）=====
+        let fzMode = 'day';
+        function fzSetMode(m) {
+            fzMode = m;
+            document.querySelectorAll('.board-modes .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.m === m));
+            document.getElementById('fzDayWrap').classList.toggle('hidden', m === 'range');
+            document.getElementById('fzFromWrap').classList.toggle('hidden', m !== 'range');
+            document.getElementById('fzToWrap').classList.toggle('hidden', m !== 'range');
+            fzBoard();
+        }
+        function fzPeriodRange() {
+            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
+            if (fzMode === 'day') return { from: day, to: day, label: day + '（當天）' };
+            if (fzMode === 'month') { const from = day.slice(0, 8) + '01'; return { from, to: day, label: day.slice(0, 7) + '（1日～' + day.slice(5) + '）' }; }
+            const from = document.getElementById('fzFrom').value || day;
+            const to = document.getElementById('fzTo').value || day;
+            return { from: from <= to ? from : to, to: from <= to ? to : from, label: from + ' ～ ' + to };
+        }
+        function fzBoard() {
+            const el = document.getElementById('fzBoard');
+            if (!fzPlan.lines.length) { el.innerHTML = ''; return; }
+            const { from, to, label } = fzPeriodRange();
+            document.getElementById('fzRangeHint').textContent = '統計區間：' + label;
+            el.innerHTML = fzPlan.lines.map(line => {
+                let due = 0;
+                (line.rows || []).forEach(r => { if (r.date && r.date >= from && r.date <= to) due += r.plan; });
+                let done = 0;
+                Object.values(fzDone[san(line.name)] || {}).forEach(rec =>
+                    Object.entries(rec).forEach(([d, q]) => { if (d >= from && d <= to) done += num(q); }));
+                const behind = due - done;
+                const pct = due > 0 ? Math.round(done / due * 100) : null;
+                const cls = pct == null ? 'gray' : pct >= 100 ? 'green' : pct >= 90 ? 'orange' : 'red';
+                const bTxt = behind > 0.01 ? '落後 ' + Math.round(behind) + ' 台'
+                    : behind < -0.01 ? '超前 ' + Math.round(-behind) + ' 台'
+                    : (due > 0 ? '達標 ✅' : '此區間無排程');
+                return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
+                    <div class="bd-line">${esc(line.name)}</div>
+                    <div class="bd-pct ${cls}">${pct == null ? '—' : pct + '%'}</div>
+                    <div class="bd-sub">應完成 ${Math.round(due)}・完成 ${Math.round(done)}<br>
+                    <span class="bd-behind ${behind > 0.01 ? 'neg' : 'pos'}">${bTxt}</span></div>
+                </div>`;
+            }).join('');
+        }
 
         function fzRender() {
             const line = fzPlan.lines.find(l => l.name === fzLine);
@@ -326,6 +411,7 @@
             });
             localStorage.setItem('fzDone', JSON.stringify(fzDone));
             if (db) db.ref('toolbox/frozen/done').set(fzDone);
+            fzBoard();
             fzRender();
             alert(`已儲存 ${fzLine} ${doneDs} 的完成量（${saved} 筆）`);
         }
@@ -351,6 +437,9 @@
             // 基準日預設昨天：每天看的是「截至昨天(含)」應完成 vs 實際完成
             document.getElementById('fzBase').value = addDays(todayStr(), -1);
             document.getElementById('fzDoneDate').value = addDays(todayStr(), -1);
+            document.getElementById('fzDay').value = addDays(todayStr(), -1);
+            document.getElementById('fzFrom').value = addDays(todayStr(), -7);
+            document.getElementById('fzTo').value = addDays(todayStr(), -1);
             const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
             if (p) fzPlan = p;
             const d = JSON.parse(localStorage.getItem('fzDone') || 'null');
@@ -369,7 +458,7 @@
                 });
                 db.ref('toolbox/frozen/done').on('value', s => {
                     const v = s.val();
-                    if (v) { fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzRender(); }
+                    if (v) { fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzBoard(); fzRender(); }
                 });
             }
             fzRenderAll();
