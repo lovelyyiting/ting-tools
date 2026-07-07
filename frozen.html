@@ -99,6 +99,12 @@
         .bd-behind { font-weight: bold; }
         .bd-behind.neg { color: #dc3545; }
         .bd-behind.pos { color: #28a745; }
+        .bd-mini { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.5; }
+        /* 落後彙整表 */
+        tr.lag-sub td { background: #f7f4ec; font-weight: bold; color: #6e5a3a; }
+        input.meta-in { padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
+        input.meta-in.filled { border-color: #7a8663; background: #f3f6ee; }
+        input.meta-in.short { width: 160px; }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -126,18 +132,21 @@
 
         <div class="board-sec" id="fzBoardSec" style="display:none;">
             <div class="board-head">
-                <span style="font-weight:bold;color:#55503f;">📊 達成率看板</span>
-                <span class="board-modes" style="display:flex;gap:6px;">
-                    <button class="tab-btn active" data-m="day" onclick="fzSetMode('day')">當天</button>
-                    <button class="tab-btn" data-m="month" onclick="fzSetMode('month')">當月</button>
-                    <button class="tab-btn" data-m="range" onclick="fzSetMode('range')">自訂區間</button>
-                </span>
-                <label id="fzDayWrap">日期 <input type="date" id="fzDay" onchange="fzBoard()"></label>
-                <label id="fzFromWrap" class="hidden">從 <input type="date" id="fzFrom" onchange="fzBoard()"></label>
-                <label id="fzToWrap" class="hidden">到 <input type="date" id="fzTo" onchange="fzBoard()"></label>
+                <span style="font-weight:bold;color:#55503f;">📊 達成率看板（當天＋當月）</span>
+                <label>日期 <input type="date" id="fzDay" onchange="fzBoard()"></label>
                 <span id="fzRangeHint" style="font-size:12px;color:#999;"></span>
             </div>
             <div class="board-grid" id="fzBoard"></div>
+        </div>
+
+        <div class="board-sec" id="fzLagSec" style="display:none;">
+            <div class="board-head">
+                <span style="font-weight:bold;color:#55503f;">🚨 各產線落後彙整</span>
+                <span id="fzLagHint" style="font-size:12px;color:#999;"></span>
+            </div>
+            <div class="table-wrap" style="max-height:50vh;margin-bottom:14px;">
+                <table class="data" id="fzLagTable" style="min-width:1000px;"></table>
+            </div>
         </div>
 
         <div class="tabs" id="fzTabs"></div>
@@ -150,7 +159,8 @@
         <div class="note" style="padding:0 20px 24px;">
             說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
             落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
-            「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。
+            「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
+            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天達成率、當月（1 日～該日）達成率、以及該線截至該日的總落後時數。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。
         </div>
     </div>
 
@@ -159,6 +169,7 @@
         // ===== 資料 =====
         let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
         let fzDone = {};                              // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
+        let fzMeta = {};                              // toolbox/frozen/meta  {lineSan:{batchSan:{ship,short}}}
         let fzLine = '';
 
         const FZ_ALIAS = {
@@ -298,51 +309,95 @@
         }
         function fzPick(n) { fzLine = n; fzRenderAll(); }
 
-        // ===== 達成率看板（當天／當月／自訂區間）=====
-        let fzMode = 'day';
-        function fzSetMode(m) {
-            fzMode = m;
-            document.querySelectorAll('.board-modes .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.m === m));
-            document.getElementById('fzDayWrap').classList.toggle('hidden', m === 'range');
-            document.getElementById('fzFromWrap').classList.toggle('hidden', m !== 'range');
-            document.getElementById('fzToWrap').classList.toggle('hidden', m !== 'range');
-            fzBoard();
-        }
-        function fzPeriodRange() {
-            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
-            if (fzMode === 'day') return { from: day, to: day, label: day + '（當天）' };
-            if (fzMode === 'month') { const from = day.slice(0, 8) + '01'; return { from, to: day, label: day.slice(0, 7) + '（1日～' + day.slice(5) + '）' }; }
-            const from = document.getElementById('fzFrom').value || day;
-            const to = document.getElementById('fzTo').value || day;
-            return { from: from <= to ? from : to, to: from <= to ? to : from, label: from + ' ～ ' + to };
+        // ===== 達成率看板（當天＋當月，可自選日期）=====
+        function fzHrText(lineHr, oneHr) {
+            const parts = [];
+            if (Math.abs(lineHr) >= 0.05) parts.push(`${lineHr > 0 ? '落後' : '超前'} ${Math.round(Math.abs(lineHr) * 10) / 10} 小時（線）`);
+            if (Math.abs(oneHr) >= 0.05) parts.push(`${oneHr > 0 ? '落後' : '超前'} ${Math.round(Math.abs(oneHr) * 10) / 10} 小時（1人）`);
+            return parts.length ? parts.join('・') : '無落後 ✅';
         }
         function fzBoard() {
             const el = document.getElementById('fzBoard');
             if (!fzPlan.lines.length) { el.innerHTML = ''; return; }
-            const { from, to, label } = fzPeriodRange();
-            document.getElementById('fzRangeHint').textContent = '統計區間：' + label;
+            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
+            const mFrom = day.slice(0, 8) + '01';
+            document.getElementById('fzRangeHint').textContent = `當天：${day}・當月：${mFrom} ～ ${day}`;
             el.innerHTML = fzPlan.lines.map(line => {
-                let due = 0;
-                (line.rows || []).forEach(r => { if (r.date && r.date >= from && r.date <= to) due += r.plan; });
-                let done = 0;
-                Object.values(fzDone[san(line.name)] || {}).forEach(rec =>
-                    Object.entries(rec).forEach(([d, q]) => { if (d >= from && d <= to) done += num(q); }));
-                const behind = due - done;
-                const pct = due > 0 ? Math.round(done / due * 100) : null;
-                const cls = pct == null ? 'gray' : pct >= 100 ? 'green' : pct >= 90 ? 'orange' : 'red';
-                const bTxt = behind > 0.01 ? '落後 ' + Math.round(behind) + ' 台'
-                    : behind < -0.01 ? '超前 ' + Math.round(-behind) + ' 台'
-                    : (due > 0 ? '達標 ✅' : '此區間無排程');
+                const stat = (from, to) => {
+                    let due = 0;
+                    (line.rows || []).forEach(r => { if (r.date && r.date >= from && r.date <= to) due += r.plan; });
+                    let done = 0;
+                    Object.values(fzDone[san(line.name)] || {}).forEach(rec =>
+                        Object.entries(rec).forEach(([d, q]) => { if (d >= from && d <= to) done += num(q); }));
+                    return { due, done, pct: due > 0 ? Math.round(done / due * 100) : null };
+                };
+                const d = stat(day, day), m = stat(mFrom, day);
+                // 總落後時數＝截至看板日期的累計落後換算（線／1人分開）
+                const list = fzAggregate(line, day);
+                const lineHr = list.filter(a => a.hrBase === '線' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+                const oneHr = list.filter(a => a.hrBase === '1人' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+                const pcls = p => p == null ? 'gray' : p >= 100 ? 'green' : p >= 90 ? 'orange' : 'red';
+                const cls = d.pct != null ? pcls(d.pct) : pcls(m.pct);
+                const dTxt = d.pct == null ? (d.due > 0 ? '0%' : '—') : d.pct + '%';
                 return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
                     <div class="bd-line">${esc(line.name)}</div>
-                    <div class="bd-pct ${cls}">${pct == null ? '—' : pct + '%'}</div>
-                    <div class="bd-sub">應完成 ${Math.round(due)}・完成 ${Math.round(done)}<br>
-                    <span class="bd-behind ${behind > 0.01 ? 'neg' : 'pos'}">${bTxt}</span></div>
+                    <div class="bd-pct ${pcls(d.pct)}">${dTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> 當天</span></div>
+                    <div class="bd-sub">當天 應 ${Math.round(d.due)}・完成 ${Math.round(d.done)}<br>
+                    當月 <span class="bd-behind ${m.pct != null && m.pct < 100 ? 'neg' : 'pos'}">${m.pct == null ? '—' : m.pct + '%'}</span>（應 ${Math.round(m.due)}・完成 ${Math.round(m.done)}）</div>
+                    <div class="bd-mini">總落後時數：<span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}">${fzHrText(lineHr, oneHr)}</span></div>
                 </div>`;
             }).join('');
         }
 
+        // ===== 各產線落後彙整表（出貨日、缺料可自填，自動儲存）=====
+        function fzLag() {
+            const sec = document.getElementById('fzLagSec');
+            const table = document.getElementById('fzLagTable');
+            if (!fzPlan.lines.length) { sec.style.display = 'none'; return; }
+            sec.style.display = '';
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            document.getElementById('fzLagHint').textContent = `基準日：${baseDs}・列出「應完成 > 累計完成」的批次，出貨日／缺料填完自動儲存並同步`;
+            const head = `<tr><th>產線</th><th>批次</th><th>料號</th><th>工單</th><th>應完成</th><th>累計完成</th><th>落後(台)</th><th>落後(時)</th><th>出貨日</th><th>缺料狀況</th></tr>`;
+            let html = head, any = false;
+            fzPlan.lines.forEach(line => {
+                const lk = san(line.name);
+                const rows = fzAggregate(line, baseDs).filter(a => a.behind > 0.01);
+                if (!rows.length) return;
+                any = true;
+                let subQty = 0, subLineHr = 0, subOneHr = 0;
+                rows.forEach(a => {
+                    const key = san(a.batch + '|' + a.part);
+                    const meta = (fzMeta[lk] || {})[key] || {};
+                    subQty += a.behind;
+                    if (a.hrBase === '線' && a.behindHr != null) subLineHr += a.behindHr;
+                    if (a.hrBase === '1人' && a.behindHr != null) subOneHr += a.behindHr;
+                    html += `<tr class="behind">
+                        <td>${esc(line.name)}</td><td>${esc(a.batch)}</td><td>${esc(a.part)}</td><td>${esc(a.wo)}</td>
+                        <td>${Math.round(a.due)}</td><td>${Math.round(a.done)}</td>
+                        <td class="neg">${Math.round(a.behind)}</td>
+                        <td class="neg">${a.behindHr != null ? (Math.round(a.behindHr * 10) / 10) + '(' + a.hrBase + ')' : '—'}</td>
+                        <td><input type="date" class="meta-in ${meta.ship ? 'filled' : ''}" value="${esc(meta.ship || '')}" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="ship"></td>
+                        <td><input type="text" class="meta-in short ${meta.short ? 'filled' : ''}" value="${esc(meta.short || '')}" placeholder="缺什麼料？沒缺免填" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="short"></td>
+                    </tr>`;
+                });
+                html += `<tr class="lag-sub"><td colspan="6">📌 ${esc(line.name)} 小計（總落後）</td>
+                    <td>${Math.round(subQty)} 台</td><td colspan="3">${fzHrText(subLineHr, subOneHr)}</td></tr>`;
+            });
+            table.innerHTML = any ? html : head + `<tr><td colspan="10"><div class="empty-hint">目前沒有落後批次 🎉</div></td></tr>`;
+        }
+        function fzSetMeta(lk, key, f, val) {
+            val = String(val || '').trim();
+            fzMeta[lk] = fzMeta[lk] || {}; fzMeta[lk][key] = fzMeta[lk][key] || {};
+            if (val) fzMeta[lk][key][f] = val; else delete fzMeta[lk][key][f];
+            if (!Object.keys(fzMeta[lk][key]).length) delete fzMeta[lk][key];
+            if (!Object.keys(fzMeta[lk]).length) delete fzMeta[lk];
+            localStorage.setItem('fzMeta', JSON.stringify(fzMeta));
+            if (db) db.ref('toolbox/frozen/meta').set(fzMeta);
+            fzLag();
+        }
+
         function fzRender() {
+            fzLag();
             const line = fzPlan.lines.find(l => l.name === fzLine);
             const table = document.getElementById('fzTable');
             if (!line) { return; }
@@ -420,6 +475,18 @@
             if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
             const baseDs = document.getElementById('fzBase').value || todayStr();
             const wb = XLSX.utils.book_new();
+            // 第一頁：各產線落後彙整（含出貨日、缺料）
+            const lagAoa = [['產線', '批次', '料號', '工單', '應完成(≤' + baseDs + ')', '累計完成', '落後(台)', '落後(時)', '出貨日', '缺料狀況']];
+            fzPlan.lines.forEach(line => {
+                const lk = san(line.name);
+                fzAggregate(line, baseDs).filter(a => a.behind > 0.01).forEach(a => {
+                    const meta = (fzMeta[lk] || {})[san(a.batch + '|' + a.part)] || {};
+                    lagAoa.push([line.name, a.batch, a.part, a.wo, Math.round(a.due), Math.round(a.done),
+                        Math.round(a.behind), a.behindHr != null ? Math.round(a.behindHr * 10) / 10 : '',
+                        meta.ship || '', meta.short || '']);
+                });
+            });
+            if (lagAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lagAoa), '落後彙整');
             fzPlan.lines.forEach(line => {
                 const list = fzAggregate(line, baseDs);
                 const aoa = [['批次', '料號', '工單', 'MO量', '排程總量', '排程起', '排程迄', '應完成(≤' + baseDs + ')', '累計完成', '尾數', '達成率', '落後(台)', '落後(時)']];
@@ -438,12 +505,17 @@
             document.getElementById('fzBase').value = addDays(todayStr(), -1);
             document.getElementById('fzDoneDate').value = addDays(todayStr(), -1);
             document.getElementById('fzDay').value = addDays(todayStr(), -1);
-            document.getElementById('fzFrom').value = addDays(todayStr(), -7);
-            document.getElementById('fzTo').value = addDays(todayStr(), -1);
             const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
             if (p) fzPlan = p;
             const d = JSON.parse(localStorage.getItem('fzDone') || 'null');
             if (d) fzDone = d;
+            const mt = JSON.parse(localStorage.getItem('fzMeta') || 'null');
+            if (mt) fzMeta = mt;
+            // 彙整表的出貨日／缺料：用事件代理，填完（blur）就存
+            document.getElementById('fzLagTable').addEventListener('change', e => {
+                const t = e.target;
+                if (t.classList && t.classList.contains('meta-in')) fzSetMeta(t.dataset.lk, t.dataset.key, t.dataset.f, t.value);
+            });
             if (fzPlan.lines.length && !fzLine) fzLine = fzPlan.lines[0].name;
             if (db) {
                 db.ref('toolbox/frozen/plan').on('value', s => {
@@ -459,6 +531,10 @@
                 db.ref('toolbox/frozen/done').on('value', s => {
                     const v = s.val();
                     if (v) { fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzBoard(); fzRender(); }
+                });
+                db.ref('toolbox/frozen/meta').on('value', s => {
+                    const v = s.val();
+                    if (v) { fzMeta = v; localStorage.setItem('fzMeta', JSON.stringify(v)); fzLag(); }
                 });
             }
             fzRenderAll();
