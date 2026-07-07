@@ -124,6 +124,10 @@
             <div id="omResult" class="hidden">
                 <div class="summary" id="omSummary"></div>
                 <div id="omWarn"></div>
+                <div class="parttabs" id="omViewTabs">
+                    <button class="ptab active" data-v="joint" onclick="omSetView('joint')">📋 批次總評（多料一起評估）</button>
+                    <button class="ptab" data-v="part" onclick="omSetView('part')">單一料號明細</button>
+                </div>
                 <div class="parttabs" id="omPartTabs"></div>
                 <div class="parthead" id="omPartHead"></div>
                 <div class="row-flex" style="margin-bottom:10px;">
@@ -326,7 +330,7 @@
                 let worst = 'green', firstShort = '', totalDemand = 0;
                 const RANK = { green: 0, orange: 1, red: 2 };
 
-                batches.forEach(b => {
+                batches.forEach((b, bIdx) => {
                     const model = findModelExt(b.batch, b.veh, models);
                     const usage = usageOf(model, mat);
                     if (model && !name) { const nm = model.rows.find(r => r.mat === mat && r.desc); if (nm) name = String(nm.desc).slice(0, 28); }
@@ -366,7 +370,7 @@
                     if (RANK[cls] > RANK[worst]) worst = cls;
                     if (cls === 'red' && !firstShort) firstShort = b.batch + '（' + b.date + '）';
                     rows.push({
-                        date: b.date, line: b.line, batch: b.batch, veh: model.name, usage,
+                        bIdx, date: b.date, line: b.line, batch: b.batch, veh: model.name, usage,
                         demand: Math.round(demand * 100) / 100, fromInv: Math.round(fromInv * 100) / 100,
                         fromPo: Math.round(fromPo * 100) / 100, short: Math.round(short * 100) / 100,
                         cover: (coverDate && coverDate > b.date) ? coverDate : '', status, cls, note
@@ -426,11 +430,65 @@
             document.getElementById('omWarn').innerHTML = noBom.length
                 ? `<div class="warnbox">⚠️ 這些料號在排程車種的 BOM 查不到用量（可能該料號不用於這些車種，或雲端BOM缺該車種）：${noBom.map(p => esc(p.mat) + '（車種：' + p.noUsageVeh.map(esc).join('/') + '）').join('；')}</div>` : '';
 
-            document.getElementById('omPartTabs').innerHTML = omResult.map(p =>
+            document.querySelectorAll('#omViewTabs .ptab').forEach(b => b.classList.toggle('active', b.dataset.v === omView));
+            const pt = document.getElementById('omPartTabs');
+            if (omView === 'joint') {
+                pt.innerHTML = '';
+                omRenderJoint();
+                return;
+            }
+            pt.innerHTML = omResult.map(p =>
                 `<button class="ptab ${p.worst === 'red' ? 'red' : p.worst === 'orange' ? 'orange' : ''} ${p.mat === omPart ? 'active' : ''}" onclick="omPickPart('${p.mat.replace(/'/g, "\\'")}')">${esc(p.mat)}${p.worst === 'red' ? ' 🔴' : p.worst === 'orange' ? ' 🟠' : ''}</button>`).join('');
             omRenderPart();
         }
-        function omPickPart(m) { omPart = m; document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active')); omRenderResult(); }
+        function omPickPart(m) { omPart = m; omView = 'part'; omRenderResult(); }
+        let omView = 'joint';
+        function omSetView(v) { omView = v; omRenderResult(); }
+
+        // 批次總評：每一批把所有輸入料號一起評估，算出「延後到哪天才齊料」
+        function omBuildJoint() {
+            const batches = [...omSched.rows].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+            const mats = omResult.map(p => p.mat);
+            const rowByIdx = omResult.map(p => { const m = {}; p.rows.forEach(r => m[r.bIdx] = r); return m; });
+            const out = [];
+            batches.forEach((b, bi) => {
+                const cells = rowByIdx.map(m => m[bi]);
+                if (cells.every(c => !c)) return; // 這批不用任何輸入料號
+                const reds = [], covers = [];
+                let overdue = false;
+                const cellView = cells.map((c, k) => {
+                    if (!c) return { txt: '—', cls: '' };
+                    if (c.cls === 'red') { reds.push(mats[k] + ' 缺' + c.short); return { txt: '🔴缺' + c.short, cls: 'st-red' }; }
+                    if (c.cover) { covers.push(c.cover); return { txt: '🟠' + c.cover.slice(5), cls: 'st-orange' }; }
+                    if (c.cls === 'orange') { overdue = true; return { txt: '⚠️催', cls: 'st-orange' }; }
+                    return { txt: '🟢', cls: 'st-green' };
+                });
+                let verdict, vcls, rowCls = '', delay = '';
+                if (reds.length) { verdict = '❌ 缺料無法滿足（' + reds.join('、') + '）'; vcls = 'st-red'; rowCls = 'red'; }
+                else if (covers.length) { delay = covers.reduce((mx, x) => (x > mx ? x : mx), ''); verdict = '🟠 延後至 ' + delay + ' 才齊料'; vcls = 'st-orange'; rowCls = 'orange'; }
+                else if (overdue) { verdict = '✅ 可如期（⚠️含逾期在途請催）'; vcls = 'st-orange'; rowCls = 'orange'; }
+                else { verdict = '✅ 可如期生產'; vcls = 'st-green'; }
+                out.push({ date: b.date, line: b.line, batch: b.batch, cells: cellView, verdict, vcls, rowCls, delay });
+            });
+            return { mats, rows: out };
+        }
+        function omRenderJoint() {
+            const { mats, rows } = omBuildJoint();
+            const okc = rows.filter(r => r.vcls === 'st-green').length;
+            const waitc = rows.filter(r => r.rowCls === 'orange').length;
+            const badc = rows.filter(r => r.rowCls === 'red').length;
+            document.getElementById('omPartHead').innerHTML =
+                `每批把 <b>${mats.length}</b> 個料號一起評估：🟢滿足・🟠待到廠（月-日）・🔴缺料・⚠️催＝靠逾期在途湊滿。` +
+                `共 <b>${rows.length}</b> 批用到這些料：✅可如期 <b>${okc}</b>・🟠要延後/要催 <b>${waitc}</b>・❌缺料 <b>${badc}</b>`;
+            const table = document.getElementById('omTable');
+            if (!rows.length) { table.innerHTML = `<tr><td><div class="empty-hint">排程批次都沒用到輸入的料號</div></td></tr>`; return; }
+            table.innerHTML =
+                `<tr><th>生產日</th><th>產線</th><th>批次</th>${mats.map(m => `<th>${esc(m)}</th>`).join('')}<th>判定（不滿足延後到哪天）</th></tr>` +
+                rows.map(r => `<tr class="${r.rowCls}">
+                    <td>${esc(r.date)}</td><td>${esc(r.line)}</td><td>${esc(r.batch)}</td>` +
+                    r.cells.map(c => `<td class="${c.cls}">${c.txt}</td>`).join('') +
+                    `<td class="${r.vcls}">${r.verdict}</td></tr>`).join('');
+        }
         function omRenderPart() {
             const p = omResult.find(x => x.mat === omPart);
             if (!p) return;
@@ -453,6 +511,13 @@
         function omExport() {
             if (!omResult) return;
             const wb = XLSX.utils.book_new();
+            const joint = omBuildJoint();
+            const jh = ['生產日', '產線', '批次', ...joint.mats, '判定'];
+            const ja = [jh];
+            joint.rows.forEach(r => ja.push([r.date, r.line, r.batch,
+                ...r.cells.map(c => c.txt.replace(/[🟢🟠🔴⚠️❌✅]/g, '').trim() || (c.txt.includes('🟢') ? '滿足' : c.txt)),
+                r.verdict.replace(/[🟠🔴⚠️❌✅]/g, '').trim()]));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ja), '批次總評');
             const head = ['料號', '品名', '狀態', '生產日', '產線', '批次', '車種', '每台用量', '需求量', '庫存扣抵', '在途扣抵', '缺口', '待到廠日', '說明'];
             const all = [head];
             omResult.forEach(p => p.rows.forEach(r => all.push([p.mat, p.name, r.status, r.date, r.line, r.batch, r.veh, r.usage, r.demand, r.fromInv, r.fromPo, r.short, r.cover, r.note])));
