@@ -100,6 +100,11 @@
         .bd-behind.neg { color: #dc3545; }
         .bd-behind.pos { color: #28a745; }
         .bd-mini { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.5; }
+        .bd-warn {
+            background: #dc3545; color: white; font-size: 11px; font-weight: normal;
+            padding: 2px 8px; border-radius: 10px; margin-left: 4px; white-space: nowrap;
+        }
+        .bd-now { border-top: 1px dashed #e0dcd0; margin-top: 6px; padding-top: 6px; }
         /* 落後彙整表 */
         tr.lag-sub td { background: #f7f4ec; font-weight: bold; color: #6e5a3a; }
         input.meta-in { padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
@@ -133,8 +138,10 @@
 
         <div class="board-sec" id="fzBoardSec" style="display:none;">
             <div class="board-head">
-                <span style="font-weight:bold;color:#55503f;">📊 達成率看板（當天＋當月）</span>
+                <span style="font-weight:bold;color:#55503f;">📊 達成率看板（當天＋當月＋今年）</span>
                 <label>日期 <input type="date" id="fzDay" onchange="fzBoard()"></label>
+                <button class="export-btn" onclick="fzCopyReport()">📋 複製日報</button>
+                <button class="export-btn" onclick="fzMailReport()">✉️ 郵件日報</button>
                 <span id="fzRangeHint" style="font-size:12px;color:#999;"></span>
             </div>
             <div class="board-grid" id="fzBoard"></div>
@@ -162,7 +169,7 @@
             說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
             落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
             「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
-            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天達成率、當月（1 日～該日）達成率、以及該線截至該日的總落後時數。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
+            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
             <b>每週更新 Frozen 表</b>：先在「匯入起算日」選新排程生效日（例如下週一），再匯入新檔 → 只會替換該日（含）之後的排程；之前的排程、期初落後、尾數基準與已填完成量都保留。留空匯入＝整批覆蓋。
         </div>
     </div>
@@ -361,37 +368,120 @@
             if (Math.abs(oneHr) >= 0.05) parts.push(`${oneHr > 0 ? '落後' : '超前'} ${Math.round(Math.abs(oneHr) * 10) / 10} 小時（1人）`);
             return parts.length ? parts.join('・') : '無落後 ✅';
         }
+        // 區間統計（看板卡片與日報共用）
+        function fzStatRange(line, from, to) {
+            let due = 0;
+            (line.rows || []).forEach(r => { if (r.date && r.date >= from && r.date <= to) due += r.plan; });
+            let done = 0;
+            Object.values(fzDone[san(line.name)] || {}).forEach(rec =>
+                Object.entries(rec).forEach(([d, q]) => { if (d >= from && d <= to) done += num(q); }));
+            return { due, done, pct: due > 0 ? Math.round(done / due * 100) : null };
+        }
+        // 截至 baseDs 的累計落後時數（線／1人分開）
+        function fzLineHours(line, baseDs) {
+            const list = fzAggregate(line, baseDs);
+            const lineHr = list.filter(a => a.hrBase === '線' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+            const oneHr = list.filter(a => a.hrBase === '1人' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+            return { list, lineHr, oneHr, behindQty: list.reduce((s, a) => s + Math.max(a.behind, 0), 0) };
+        }
+        // 落後警訊門檻：整線落後 ≥ 8 小時、或 1 人工時落後 ≥ 24 小時
+        const fzWarn = (lineHr, oneHr) => lineHr >= 8 || oneHr >= 24;
+        // 產線現況：現在做哪一批（最近有回報完成量的未完批次）＋下一批預計日
+        function fzLineNow(line, baseDs) {
+            const list = fzAggregate(line, baseDs);
+            const active = list.filter(a => a.tail > 0.01);
+            if (!active.length) return null;
+            const doneLine = fzDone[san(line.name)] || {};
+            let cur = null, curLast = '';
+            active.forEach(a => {
+                const rec = doneLine[san(a.batch + '|' + a.part)] || {};
+                const last = Object.keys(rec).filter(d => num(rec[d]) > 0).sort().pop() || '';
+                if (last && last > curLast) { curLast = last; cur = a; }
+            });
+            if (!cur) cur = active[0];   // 都沒回報過 → 排程最早的未完批次
+            const next = active.find(a => a !== cur && (a.first || '') > (cur.first || '')) || active.find(a => a !== cur) || null;
+            return { cur, curLast, next };
+        }
+        function fzNowText(now) {
+            if (!now) return { cur: '✅ 無未完批次', next: '' };
+            const c = now.cur;
+            const cur = `${c.batch}（尾數 ${Math.round(c.tail)}${now.curLast ? '，最近回報 ' + now.curLast.slice(5) : '，尚未回報'}）`;
+            const next = now.next ? `${now.next.batch}（排程 ${now.next.first ? now.next.first.slice(5) : '—'} 起）` : '無';
+            return { cur, next };
+        }
+
         function fzBoard() {
             const el = document.getElementById('fzBoard');
             if (!fzPlan.lines.length) { el.innerHTML = ''; return; }
             const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
-            const mFrom = day.slice(0, 8) + '01';
-            document.getElementById('fzRangeHint').textContent = `當天：${day}・當月：${mFrom} ～ ${day}`;
+            const mFrom = day.slice(0, 8) + '01', yFrom = day.slice(0, 4) + '-01-01';
+            document.getElementById('fzRangeHint').textContent = `當天：${day}・當月：${mFrom}～${day}・今年：${yFrom}～${day}`;
             el.innerHTML = fzPlan.lines.map(line => {
-                const stat = (from, to) => {
-                    let due = 0;
-                    (line.rows || []).forEach(r => { if (r.date && r.date >= from && r.date <= to) due += r.plan; });
-                    let done = 0;
-                    Object.values(fzDone[san(line.name)] || {}).forEach(rec =>
-                        Object.entries(rec).forEach(([d, q]) => { if (d >= from && d <= to) done += num(q); }));
-                    return { due, done, pct: due > 0 ? Math.round(done / due * 100) : null };
-                };
-                const d = stat(day, day), m = stat(mFrom, day);
-                // 總落後時數＝截至看板日期的累計落後換算（線／1人分開）
-                const list = fzAggregate(line, day);
-                const lineHr = list.filter(a => a.hrBase === '線' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
-                const oneHr = list.filter(a => a.hrBase === '1人' && a.behindHr != null).reduce((s, a) => s + a.behindHr, 0);
+                const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
+                const { lineHr, oneHr } = fzLineHours(line, day);
+                const warn = fzWarn(lineHr, oneHr);
+                const nt = fzNowText(fzLineNow(line, day));
                 const pcls = p => p == null ? 'gray' : p >= 100 ? 'green' : p >= 90 ? 'orange' : 'red';
-                const cls = d.pct != null ? pcls(d.pct) : pcls(m.pct);
+                const cls = warn ? 'red' : (d.pct != null ? pcls(d.pct) : pcls(m.pct));
                 const dTxt = d.pct == null ? (d.due > 0 ? '0%' : '—') : d.pct + '%';
+                const pctTag = p => `<span class="bd-behind ${p != null && p < 100 ? 'neg' : 'pos'}">${p == null ? '—' : p + '%'}</span>`;
                 return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
-                    <div class="bd-line">${esc(line.name)}</div>
+                    <div class="bd-line">${esc(line.name)}${warn ? '<span class="bd-warn">⚠️ 落後警訊</span>' : ''}</div>
                     <div class="bd-pct ${pcls(d.pct)}">${dTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> 當天</span></div>
                     <div class="bd-sub">當天 應 ${Math.round(d.due)}・完成 ${Math.round(d.done)}<br>
-                    當月 <span class="bd-behind ${m.pct != null && m.pct < 100 ? 'neg' : 'pos'}">${m.pct == null ? '—' : m.pct + '%'}</span>（應 ${Math.round(m.due)}・完成 ${Math.round(m.done)}）</div>
+                    當月 ${pctTag(m.pct)}（應 ${Math.round(m.due)}・完成 ${Math.round(m.done)}）<br>
+                    今年 ${pctTag(y.pct)}（應 ${Math.round(y.due)}・完成 ${Math.round(y.done)}）</div>
                     <div class="bd-mini">總落後時數：<span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}">${fzHrText(lineHr, oneHr)}</span></div>
+                    <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
                 </div>`;
             }).join('');
+        }
+
+        // ===== 日報（複製文字／開郵件）=====
+        function fzReportText() {
+            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
+            const mFrom = day.slice(0, 8) + '01', yFrom = day.slice(0, 4) + '-01-01';
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            const pt = p => p == null ? '—' : p + '%';
+            let out = `【Frozen 生產進度日報】統計日 ${day}\n`;
+            fzPlan.lines.forEach(line => {
+                const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
+                const { lineHr, oneHr, behindQty } = fzLineHours(line, day);
+                const nt = fzNowText(fzLineNow(line, day));
+                out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}\n`;
+                out += `　當天 ${pt(d.pct)}（應${Math.round(d.due)}／完${Math.round(d.done)}）｜當月 ${pt(m.pct)}｜今年 ${pt(y.pct)}\n`;
+                out += `　累計落後 ${Math.round(behindQty)} 台｜${fzHrText(lineHr, oneHr)}\n`;
+                out += `　現在：${nt.cur}\n　下一批：${nt.next}\n`;
+            });
+            const lag = fzLagAoa(baseDs, false);
+            if (lag.length > 1) {
+                out += `\n■ 落後彙整（截至 ${baseDs}，共 ${lag.length - 1} 批）\n`;
+                lag.slice(1).forEach(r => {
+                    out += `　${r[0]}｜${r[1]}｜${r[2]}｜落後${r[6]}台${r[7] !== '' ? r[7] + '時' : ''}${r[8] ? '｜出貨' + r[8] : ''}${r[9] ? '｜缺料:' + r[9] : ''}\n`;
+                });
+            }
+            out += `\n（自動產生：Frozen 進度追蹤 ${location.origin}${location.pathname}）`;
+            return out;
+        }
+        function fzCopyReport() {
+            if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
+            const t = fzReportText();
+            const ok = () => alert('日報文字已複製，貼到郵件內文即可');
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok, () => fzCopyFallback(t, ok));
+            else fzCopyFallback(t, ok);
+        }
+        function fzCopyFallback(t, ok) {
+            const ta = document.createElement('textarea');
+            ta.value = t; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); ok(); } catch (e) { alert('複製失敗，請改用郵件日報'); }
+            ta.remove();
+        }
+        function fzMailReport() {
+            if (!fzPlan.lines.length) { alert('請先匯入 Frozen 表'); return; }
+            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
+            let body = fzReportText();
+            if (body.length > 1800) body = body.slice(0, 1800) + '\n…（內容過長截斷，完整版請用「複製日報」貼上）';
+            location.href = 'mailto:?subject=' + encodeURIComponent(`Frozen 生產進度日報 ${day}`) + '&body=' + encodeURIComponent(body);
         }
 
         // ===== 各產線落後彙整表（出貨日、缺料可自填，自動儲存）=====
@@ -467,7 +557,8 @@
             if (!Object.keys(fzMeta[lk][key]).length) delete fzMeta[lk][key];
             if (!Object.keys(fzMeta[lk]).length) delete fzMeta[lk];
             localStorage.setItem('fzMeta', JSON.stringify(fzMeta));
-            if (db) db.ref('toolbox/frozen/meta').set(fzMeta);
+            // 只寫這一批次的欄位，避免蓋掉別人同時填的資料
+            if (db) db.ref('toolbox/frozen/meta/' + lk + '/' + key).set((fzMeta[lk] && fzMeta[lk][key]) || null);
             fzLag();
         }
 
@@ -540,7 +631,8 @@
                 if (!Object.keys(fzDone[lk][key]).length) delete fzDone[lk][key];
             });
             localStorage.setItem('fzDone', JSON.stringify(fzDone));
-            if (db) db.ref('toolbox/frozen/done').set(fzDone);
+            // 只寫這條線，避免蓋掉別人同時填的其他線
+            if (db) db.ref('toolbox/frozen/done/' + lk).set(fzDone[lk] ?? null);
             fzBoard();
             fzRender();
             alert(`已儲存 ${fzLine} ${doneDs} 的完成量（${saved} 筆）`);
