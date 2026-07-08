@@ -550,13 +550,14 @@
                         fzRenderAll();
                     }
                 });
+                // 雲端為準：空值也要覆蓋本地快取，避免清空後舊資料復活
                 db.ref('toolbox/frozen/done').on('value', s => {
-                    const v = s.val();
-                    if (v) { fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzBoard(); fzRender(); }
+                    const v = s.val() || {};
+                    fzDone = v; localStorage.setItem('fzDone', JSON.stringify(v)); fzBoard(); fzRender();
                 });
                 db.ref('toolbox/frozen/meta').on('value', s => {
-                    const v = s.val();
-                    if (v) { fzMeta = v; localStorage.setItem('fzMeta', JSON.stringify(v)); fzLag(); }
+                    const v = s.val() || {};
+                    fzMeta = v; localStorage.setItem('fzMeta', JSON.stringify(v)); fzLag();
                 });
             }
             fzRenderAll();
