@@ -499,10 +499,10 @@
                     ${main ? `<div class="bd-pct ${pcls(main.pct)}">${mainTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> ${esc(main.label)}</span></div>
                     <div class="bd-sub">${main.label} 應 ${Math.round(main.due)}・完成 ${Math.round(main.done)}${subLines ? '<br>' + subLines : ''}</div>` :
                     (subLines ? `<div class="bd-sub">${subLines}</div>` : '')}
-                    <div class="bd-mini">總落後時數：<span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}">${fzHrText(lineHr, oneHr)}</span></div>
+                    <div class="bd-mini">總落後時數：<br><span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}" style="font-size:16px;">${fzHrText(lineHr, oneHr).replace(/落後 (?=\d)/g, '')}</span></div>
                     <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
-                    ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕，請現場加速</div>' : ''}
-                    ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可先落後，生管調整中</div>' : ''}
+                    ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕</div>' : ''}
+                    ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可落後生管調整</div>' : ''}
                 </div>`;
             }).join('');
             // 指示操作區（看板外）：點了顯示在上方卡片內
