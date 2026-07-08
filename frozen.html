@@ -112,10 +112,16 @@
         }
         .bd-flagbar.chase { background: #dc3545; color: white; }
         .bd-flagbar.adjust { background: #2e7d32; color: white; }
-        .bd-flags { display: flex; gap: 6px; margin-top: 8px; }
+        /* 指示操作區（在看板外，截圖看板不會拍到按鈕） */
+        .flag-panel { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 14px; }
+        .flag-group {
+            display: flex; align-items: center; gap: 6px; border: 1px dashed #d5cfc0;
+            border-radius: 10px; padding: 6px 10px; background: #fbfaf6;
+        }
+        .flag-group b { font-size: 13.5px; color: #55503f; }
         .flag-btn {
-            flex: 1; border: 1.5px solid #ccc; background: white; color: #777;
-            padding: 7px 4px; border-radius: 8px; font-size: 13.5px; cursor: pointer; white-space: nowrap;
+            border: 1.5px solid #ccc; background: white; color: #777;
+            padding: 5px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; white-space: nowrap;
         }
         .flag-btn.chase.on { background: #dc3545; border-color: #dc3545; color: white; font-weight: bold; }
         .flag-btn.adjust.on { background: #2e7d32; border-color: #2e7d32; color: white; font-weight: bold; }
@@ -164,6 +170,7 @@
                 <span id="fzRangeHint" style="font-size:12px;color:#999;"></span>
             </div>
             <div class="board-grid" id="fzBoard"></div>
+            <div class="flag-panel" id="fzFlagPanel"></div>
         </div>
 
         <div class="board-sec" id="fzLagSec" style="display:none;">
@@ -188,7 +195,7 @@
             說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
             落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
             「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
-            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>生管指示</b>：每張卡下方可點「⚡ 需追趕」或「🛠 可落後·生管調整」告知現場（再點一次取消），全員同步看到，日報也會帶出。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
+            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>生管指示</b>：看板下方操作區點「⚡ 需追趕」或「🛠 可落後」（再點一次取消），會以大字橫幅顯示在該線卡片內，全員同步、日報帶出；按鈕在看板外，截圖看板不會拍到。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
             <b>每週更新 Frozen 表</b>：先在「匯入起算日」選新排程生效日（例如下週一），再匯入新檔 → 只會替換該日（含）之後的排程；之前的排程、期初落後、尾數基準與已填完成量都保留。留空匯入＝整批覆蓋。
         </div>
     </div>
@@ -483,7 +490,6 @@
                     `${s.label} ${pctTag(s.pct)}（應 ${Math.round(s.due)}・完成 ${Math.round(s.done)}）`).join('<br>');
                 const lk = san(line.name);
                 const st = fzChase[lk] === true ? 'chase' : (fzChase[lk] || '');
-                const lkq = lk.replace(/'/g, "\\'");
                 return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
                     <div class="bd-line">${esc(line.name)}${warn ? '<span class="bd-warn">⚠️ 落後警訊</span>' : ''}</div>
                     ${main ? `<div class="bd-pct ${pcls(main.pct)}">${mainTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> ${esc(main.label)}</span></div>
@@ -493,12 +499,20 @@
                     <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
                     ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕，請現場加速</div>' : ''}
                     ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可先落後，生管調整中</div>' : ''}
-                    <div class="bd-flags" onclick="event.stopPropagation()">
-                        <button class="flag-btn chase ${st === 'chase' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'chase')">⚡ 需追趕</button>
-                        <button class="flag-btn adjust ${st === 'adjust' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'adjust')">🛠 可落後·生管調整</button>
-                    </div>
                 </div>`;
             }).join('');
+            // 指示操作區（看板外）：點了顯示在上方卡片內
+            document.getElementById('fzFlagPanel').innerHTML =
+                `<span style="font-size:13px;color:#999;align-self:center;">🚩 生管指示（點選後顯示在上方看板內）：</span>` +
+                fzPlan.lines.map(line => {
+                    const lk = san(line.name);
+                    const st = fzChase[lk] === true ? 'chase' : (fzChase[lk] || '');
+                    const lkq = lk.replace(/'/g, "\\'");
+                    return `<span class="flag-group"><b>${esc(line.name)}</b>
+                        <button class="flag-btn chase ${st === 'chase' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'chase')">⚡ 需追趕</button>
+                        <button class="flag-btn adjust ${st === 'adjust' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'adjust')">🛠 可落後</button>
+                    </span>`;
+                }).join('');
         }
 
         // ===== 日報（複製文字／開郵件）=====
