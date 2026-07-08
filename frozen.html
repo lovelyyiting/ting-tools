@@ -129,6 +129,14 @@
         }
         .flag-btn.chase.on { background: #dc3545; border-color: #dc3545; color: white; font-weight: bold; }
         .flag-btn.adjust.on { background: #2e7d32; border-color: #2e7d32; color: white; font-weight: bold; }
+        /* 現在/下一批 微調區 */
+        .now-edit { border: 1px dashed #d5cfc0; border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; background: #fbfaf6; }
+        .ne-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #f0ede4; }
+        .ne-row:last-child { border-bottom: none; }
+        .ne-row > b { font-size: 13.5px; color: #55503f; min-width: 72px; }
+        .ne-row label { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: #777; flex: 1; min-width: 220px; }
+        .ne-in { flex: 1; padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
+        .ne-in.filled { border-color: #a06e44; background: #f6efe6; }
         /* 落後彙整表 */
         tr.lag-sub td { background: #f7f4ec; font-weight: bold; color: #6e5a3a; }
         input.meta-in { padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
@@ -175,6 +183,11 @@
             </div>
             <div class="board-grid" id="fzBoard"></div>
             <div class="flag-panel" id="fzFlagPanel"></div>
+            <div style="padding:2px 0 6px;">
+                <button class="export-btn" onclick="document.getElementById('fzNowEditWrap').classList.toggle('hidden')">✏️ 微調「現在／下一批」顯示</button>
+                <span style="font-size:12px;color:#999;margin-left:6px;">留空＝系統自動判斷；填了＝以你填的為準（卡片顯示 ✎）</span>
+            </div>
+            <div class="now-edit hidden" id="fzNowEditWrap"><div id="fzNowEdit"></div></div>
         </div>
 
         <div class="board-sec" id="fzLagSec" style="display:none;">
@@ -210,7 +223,8 @@
         let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
         let fzDone = {};                              // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
         let fzMeta = {};                              // toolbox/frozen/meta  {lineSan:{batchSan:{ship,short}}}
-        let fzChase = {};                             // toolbox/frozen/chase {lineSan:true} 追趕中標記
+        let fzChase = {};                             // toolbox/frozen/chase {lineSan:'chase'|'adjust'} 生管指示
+        let fzNow = {};                               // toolbox/frozen/now   {lineSan:{cur,next}} 現在/下一批手動覆寫
         let fzLine = '';
 
         const FZ_ALIAS = {
@@ -444,6 +458,25 @@
             const next = now.next ? `${now.next.batch}（排程 ${now.next.first ? now.next.first.slice(5) : '—'} 起）` : '無';
             return { cur, next };
         }
+        // 現在/下一批顯示：有手動覆寫用覆寫，否則用自動判斷
+        function fzNowDisplay(line, day) {
+            const auto = fzNowText(fzLineNow(line, day), day);
+            const ov = fzNow[san(line.name)] || {};
+            return {
+                cur: ov.cur || auto.cur, next: ov.next || auto.next,
+                curAuto: auto.cur, nextAuto: auto.next,
+                curEdited: !!ov.cur, nextEdited: !!ov.next
+            };
+        }
+        function fzSetNow(lk, f, val) {
+            val = String(val || '').trim();
+            fzNow[lk] = fzNow[lk] || {};
+            if (val) fzNow[lk][f] = val; else delete fzNow[lk][f];
+            if (!Object.keys(fzNow[lk]).length) delete fzNow[lk];
+            localStorage.setItem('fzNow', JSON.stringify(fzNow));
+            if (db) db.ref('toolbox/frozen/now/' + lk).set(fzNow[lk] || null);
+            fzBoard();
+        }
 
         // 勾選要顯示的期間（不同場合：日報勾當天、月會勾當月…），選擇記在本機
         function fzPeriods(day) {
@@ -484,7 +517,7 @@
                 const stats = periods.map(p => ({ ...p, ...fzStatRange(line, p.from, p.to) }));
                 const { lineHr, oneHr } = fzLineHours(line, day);
                 const warn = fzWarn(lineHr, oneHr);
-                const nt = fzNowText(fzLineNow(line, day), day);
+                const nd = fzNowDisplay(line, day);
                 const pcls = p => p == null ? 'gray' : p >= 100 ? 'green' : p >= 90 ? 'orange' : 'red';
                 const main = stats[0];   // 勾選中最優先的當大字
                 const cls = warn ? 'red' : (main ? pcls(main.pct) : 'gray');
@@ -500,7 +533,7 @@
                     <div class="bd-sub">${main.label} 應 ${Math.round(main.due)}・完成 ${Math.round(main.done)}${subLines ? '<br>' + subLines : ''}</div>` :
                     (subLines ? `<div class="bd-sub">${subLines}</div>` : '')}
                     <div class="bd-mini">總落後時數：<br><span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}" style="font-size:16px;">${fzHrText(lineHr, oneHr).replace(/落後 (?=\d)/g, '')}</span></div>
-                    <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
+                    <div class="bd-mini bd-now">▶ 現在：${esc(nd.cur)}${nd.curEdited ? ' <span style="color:#a06e44;">✎</span>' : ''}<br>⏭ 下一批：${esc(nd.next)}${nd.nextEdited ? ' <span style="color:#a06e44;">✎</span>' : ''}</div>
                     ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕</div>' : ''}
                     ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可落後生管調整</div>' : ''}
                 </div>`;
@@ -517,6 +550,16 @@
                         <button class="flag-btn adjust ${st === 'adjust' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'adjust')">🛠 可落後</button>
                     </span>`;
                 }).join('');
+            // 現在／下一批 手動微調區（看板外）：留空＝自動判斷
+            document.getElementById('fzNowEdit').innerHTML = fzPlan.lines.map(line => {
+                const lk = san(line.name), lkq = lk.replace(/'/g, "\\'");
+                const nd = fzNowDisplay(line, day), ov = fzNow[lk] || {};
+                return `<div class="ne-row">
+                    <b>${esc(line.name)}</b>
+                    <label>現在<input class="ne-in ${ov.cur ? 'filled' : ''}" data-lk="${esc(lk)}" data-f="cur" value="${esc(ov.cur || '')}" placeholder="自動：${esc(nd.curAuto)}"></label>
+                    <label>下一批<input class="ne-in ${ov.next ? 'filled' : ''}" data-lk="${esc(lk)}" data-f="next" value="${esc(ov.next || '')}" placeholder="自動：${esc(nd.nextAuto)}"></label>
+                </div>`;
+            }).join('');
         }
 
         // ===== 日報（複製文字／開郵件）=====
@@ -528,7 +571,7 @@
             let out = `【Frozen 生產進度日報】統計日 ${day}\n`;
             fzPlan.lines.forEach(line => {
                 const { lineHr, oneHr, behindQty } = fzLineHours(line, day);
-                const nt = fzNowText(fzLineNow(line, day), day);
+                const nt = fzNowDisplay(line, day);
                 const st = fzChase[san(line.name)] === true ? 'chase' : fzChase[san(line.name)];
                 out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}${st === 'chase' ? '　⚡ 需追趕' : st === 'adjust' ? '　🛠 可落後（生管調整中）' : ''}\n`;
                 if (periods.length) {
@@ -758,6 +801,8 @@
             if (mt) fzMeta = mt;
             const ch = JSON.parse(localStorage.getItem('fzChase') || 'null');
             if (ch) fzChase = ch;
+            const nw = JSON.parse(localStorage.getItem('fzNow') || 'null');
+            if (nw) fzNow = nw;
             // 還原看板期間勾選
             const sh = JSON.parse(localStorage.getItem('fzShow') || 'null');
             if (sh) {
@@ -769,6 +814,11 @@
             document.getElementById('fzLagTable').addEventListener('change', e => {
                 const t = e.target;
                 if (t.classList && t.classList.contains('meta-in')) fzSetMeta(t.dataset.lk, t.dataset.key, t.dataset.f, t.value);
+            });
+            // 現在／下一批 微調：填完就存
+            document.getElementById('fzNowEdit').addEventListener('change', e => {
+                const t = e.target;
+                if (t.classList && t.classList.contains('ne-in')) fzSetNow(t.dataset.lk, t.dataset.f, t.value);
             });
             if (fzPlan.lines.length && !fzLine) fzLine = fzPlan.lines[0].name;
             if (db) {
@@ -794,6 +844,10 @@
                 db.ref('toolbox/frozen/chase').on('value', s => {
                     const v = s.val() || {};
                     fzChase = v; localStorage.setItem('fzChase', JSON.stringify(v)); fzBoard();
+                });
+                db.ref('toolbox/frozen/now').on('value', s => {
+                    const v = s.val() || {};
+                    fzNow = v; localStorage.setItem('fzNow', JSON.stringify(v)); fzBoard();
                 });
             }
             fzRenderAll();
