@@ -119,8 +119,9 @@
         </div>
 
         <div class="toolbar">
-            <button class="imp-btn" onclick="document.getElementById('fzFile').click()">📥 匯入 Frozen 表（整批覆蓋）</button>
+            <button class="imp-btn" onclick="document.getElementById('fzFile').click()">📥 匯入 Frozen 表</button>
             <input type="file" id="fzFile" accept=".xlsx,.xls" class="hidden" onchange="fzImport(this.files[0]); this.value='';">
+            <label title="留空＝整批覆蓋；選日期＝只替換該日(含)之後的排程，之前的排程與尾數基準保留">匯入起算日 <input type="date" id="fzCut"></label>
             <label>基準日 <input type="date" id="fzBase" onchange="fzRender()"></label>
             <label>完成量輸入日期 <input type="date" id="fzDoneDate" onchange="fzRender()"></label>
             <button class="save-btn" onclick="fzSaveDone()">💾 儲存完成量</button>
@@ -161,7 +162,8 @@
             說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
             落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
             「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
-            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天達成率、當月（1 日～該日）達成率、以及該線截至該日的總落後時數。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。
+            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天達成率、當月（1 日～該日）達成率、以及該線截至該日的總落後時數。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
+            <b>每週更新 Frozen 表</b>：先在「匯入起算日」選新排程生效日（例如下週一），再匯入新檔 → 只會替換該日（含）之後的排程；之前的排程、期初落後、尾數基準與已填完成量都保留。留空匯入＝整批覆蓋。
         </div>
     </div>
 
@@ -237,6 +239,37 @@
             return rows.length ? rows : null;
         }
 
+        function fzParseWb(wb) {
+            const lines = [];
+            wb.SheetNames.forEach(n => {
+                if (FZ_SKIP_SHEET(n)) return;
+                const rows = fzParseSheet(fzAoa(wb, n));
+                if (rows) lines.push({ name: n.trim(), rows });
+            });
+            return lines;
+        }
+
+        // 部分更新：舊排程留 < cut 的列，新檔只取 ≥ cut 的列；既有批次的 MO（尾數基準）沿用舊值
+        function fzMergePlan(oldLines, newLines, cut) {
+            const nk = r => String(r.batch ?? '').replace(/\s+/g, '').toUpperCase() + '|' + String(r.part ?? '').replace(/\s+/g, '').toUpperCase();
+            const newBy = {};
+            newLines.forEach(l => newBy[l.name] = l);
+            const names = oldLines.map(l => l.name);
+            newLines.forEach(l => { if (!names.includes(l.name)) names.push(l.name); });
+            return names.map(name => {
+                const o = oldLines.find(l => l.name === name), n = newBy[name];
+                const oldRows = o ? (o.rows || []) : [];
+                if (!n) return { name, rows: oldRows, keptN: oldRows.length, incN: 0 }; // 新檔沒這條線 → 原樣保留
+                const oldMo = {};
+                oldRows.forEach(r => { const k = nk(r); oldMo[k] = Math.max(oldMo[k] ?? 0, num(r.mo)); });
+                const kept = oldRows.filter(r => (r.date || '') < cut);
+                const inc = (n.rows || []).filter(r => (r.date || '') >= cut)
+                    .map(r => oldMo[nk(r)] !== undefined ? { ...r, mo: oldMo[nk(r)] } : r);
+                const rows = kept.concat(inc).sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1);
+                return { name, rows, keptN: kept.length, incN: inc.length };
+            });
+        }
+
         function fzImport(file) {
             if (!file) return;
             const reader = new FileReader();
@@ -244,21 +277,32 @@
                 let wb;
                 try { wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false }); }
                 catch (err) { alert('讀檔失敗：' + err.message); return; }
-                const lines = [];
-                wb.SheetNames.forEach(n => {
-                    if (FZ_SKIP_SHEET(n)) return;
-                    const rows = fzParseSheet(fzAoa(wb, n));
-                    if (rows) lines.push({ name: n.trim(), rows });
-                });
+                const lines = fzParseWb(wb);
                 if (!lines.length) { alert('沒有辨識到任何產線分頁（需含 裝配/生產日期、批次、零件編號/料號 欄位）'); return; }
-                const total = lines.reduce((s, l) => s + l.rows.length, 0);
-                if (!confirm(`辨識到 ${lines.length} 個產線分頁：\n${lines.map(l => `・${l.name}（${l.rows.length} 筆排程）`).join('\n')}\n\n將【整批覆蓋】現有 Frozen 排程（已填的完成量會保留），確定？`)) return;
-                fzPlan = { updatedAt: new Date().toLocaleString('zh-TW'), lines };
+                const cut = document.getElementById('fzCut').value;
+                let finalLines, msg, upNote;
+                if (cut) {
+                    finalLines = fzMergePlan(fzPlan.lines, lines, cut);
+                    msg = `辨識到 ${lines.length} 個產線分頁。\n\n【部分更新】只替換 ${cut}（含）之後的排程：\n` +
+                        finalLines.map(l => `・${l.name}：保留 ${l.keptN} 筆＋新排程 ${l.incN} 筆`).join('\n') +
+                        `\n\n${cut} 之前的排程、期初落後與尾數基準（MO）都保留，確定？`;
+                    upNote = `（${cut} 起部分更新）`;
+                } else {
+                    finalLines = lines;
+                    msg = `辨識到 ${lines.length} 個產線分頁：\n${lines.map(l => `・${l.name}（${l.rows.length} 筆排程）`).join('\n')}\n\n將【整批覆蓋】現有 Frozen 排程（已填的完成量會保留）。\n若只想更新某天之後的排程，請先取消、在「匯入起算日」選日期再匯入。確定整批覆蓋？`;
+                    upNote = '';
+                }
+                // 合併後 0 筆排程的產線不留空頁籤
+                const cleanLines = finalLines.filter(l => l.rows.length).map(l => ({ name: l.name, rows: l.rows }));
+                if (!cleanLines.length) { alert('匯入結果沒有任何排程（新檔在起算日之後沒有排程），已取消'); return; }
+                if (!confirm(msg)) return;
+                fzPlan = { updatedAt: new Date().toLocaleString('zh-TW') + upNote, lines: cleanLines };
                 localStorage.setItem('fzPlan', JSON.stringify(fzPlan));
                 if (db) db.ref('toolbox/frozen/plan').set(fzPlan);
                 if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines[0].name;
                 fzRenderAll();
-                alert(`已匯入 ${lines.length} 個產線、${total} 筆排程`);
+                const total = fzPlan.lines.reduce((s, l) => s + l.rows.length, 0);
+                alert(`已匯入完成：${fzPlan.lines.length} 個產線、共 ${total} 筆排程${cut ? `（${cut} 起替換為新排程）` : ''}`);
             };
             reader.readAsArrayBuffer(file);
         }
