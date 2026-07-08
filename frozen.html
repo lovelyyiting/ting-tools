@@ -138,8 +138,13 @@
 
         <div class="board-sec" id="fzBoardSec" style="display:none;">
             <div class="board-head">
-                <span style="font-weight:bold;color:#55503f;">📊 達成率看板（當天＋當月＋今年）</span>
+                <span style="font-weight:bold;color:#55503f;">📊 達成率看板</span>
                 <label>日期 <input type="date" id="fzDay" onchange="fzBoard()"></label>
+                <span style="display:flex;gap:8px;">
+                    <label><input type="checkbox" id="fzShowDay" checked onchange="fzShowChange()"> 當天</label>
+                    <label><input type="checkbox" id="fzShowMonth" checked onchange="fzShowChange()"> 當月</label>
+                    <label><input type="checkbox" id="fzShowYear" checked onchange="fzShowChange()"> 今年</label>
+                </span>
                 <button class="export-btn" onclick="fzCopyReport()">📋 複製日報</button>
                 <button class="export-btn" onclick="fzMailReport()">✉️ 郵件日報</button>
                 <span id="fzRangeHint" style="font-size:12px;color:#999;"></span>
@@ -414,27 +419,49 @@
             return { cur, next };
         }
 
+        // 勾選要顯示的期間（不同場合：日報勾當天、月會勾當月…），選擇記在本機
+        function fzPeriods(day) {
+            const all = [
+                { id: 'fzShowDay', label: '當天', from: day, to: day },
+                { id: 'fzShowMonth', label: '當月', from: day.slice(0, 8) + '01', to: day },
+                { id: 'fzShowYear', label: '今年', from: day.slice(0, 4) + '-01-01', to: day }
+            ];
+            return all.filter(p => document.getElementById(p.id).checked);
+        }
+        function fzShowChange() {
+            localStorage.setItem('fzShow', JSON.stringify({
+                day: document.getElementById('fzShowDay').checked,
+                month: document.getElementById('fzShowMonth').checked,
+                year: document.getElementById('fzShowYear').checked
+            }));
+            fzBoard();
+        }
+
         function fzBoard() {
             const el = document.getElementById('fzBoard');
             if (!fzPlan.lines.length) { el.innerHTML = ''; return; }
             const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
-            const mFrom = day.slice(0, 8) + '01', yFrom = day.slice(0, 4) + '-01-01';
-            document.getElementById('fzRangeHint').textContent = `當天：${day}・當月：${mFrom}～${day}・今年：${yFrom}～${day}`;
+            const periods = fzPeriods(day);
+            document.getElementById('fzRangeHint').textContent = periods.length
+                ? periods.map(p => `${p.label}：${p.from === p.to ? p.from : p.from + '～' + p.to}`).join('・')
+                : '（沒有勾選達成率期間，只顯示落後與現況）';
             el.innerHTML = fzPlan.lines.map(line => {
-                const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
+                const stats = periods.map(p => ({ ...p, ...fzStatRange(line, p.from, p.to) }));
                 const { lineHr, oneHr } = fzLineHours(line, day);
                 const warn = fzWarn(lineHr, oneHr);
                 const nt = fzNowText(fzLineNow(line, day), day);
                 const pcls = p => p == null ? 'gray' : p >= 100 ? 'green' : p >= 90 ? 'orange' : 'red';
-                const cls = warn ? 'red' : (d.pct != null ? pcls(d.pct) : pcls(m.pct));
-                const dTxt = d.pct == null ? (d.due > 0 ? '0%' : '—') : d.pct + '%';
+                const main = stats[0];   // 勾選中最優先的當大字
+                const cls = warn ? 'red' : (main ? pcls(main.pct) : 'gray');
                 const pctTag = p => `<span class="bd-behind ${p != null && p < 100 ? 'neg' : 'pos'}">${p == null ? '—' : p + '%'}</span>`;
+                const mainTxt = main ? (main.pct == null ? (main.due > 0 ? '0%' : '—') : main.pct + '%') : '';
+                const subLines = stats.slice(main ? 1 : 0).map(s =>
+                    `${s.label} ${pctTag(s.pct)}（應 ${Math.round(s.due)}・完成 ${Math.round(s.done)}）`).join('<br>');
                 return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
                     <div class="bd-line">${esc(line.name)}${warn ? '<span class="bd-warn">⚠️ 落後警訊</span>' : ''}</div>
-                    <div class="bd-pct ${pcls(d.pct)}">${dTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> 當天</span></div>
-                    <div class="bd-sub">當天 應 ${Math.round(d.due)}・完成 ${Math.round(d.done)}<br>
-                    當月 ${pctTag(m.pct)}（應 ${Math.round(m.due)}・完成 ${Math.round(m.done)}）<br>
-                    今年 ${pctTag(y.pct)}（應 ${Math.round(y.due)}・完成 ${Math.round(y.done)}）</div>
+                    ${main ? `<div class="bd-pct ${pcls(main.pct)}">${mainTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> ${esc(main.label)}</span></div>
+                    <div class="bd-sub">${main.label} 應 ${Math.round(main.due)}・完成 ${Math.round(main.done)}${subLines ? '<br>' + subLines : ''}</div>` :
+                    (subLines ? `<div class="bd-sub">${subLines}</div>` : '')}
                     <div class="bd-mini">總落後時數：<span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}">${fzHrText(lineHr, oneHr)}</span></div>
                     <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
                 </div>`;
@@ -444,16 +471,20 @@
         // ===== 日報（複製文字／開郵件）=====
         function fzReportText() {
             const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
-            const mFrom = day.slice(0, 8) + '01', yFrom = day.slice(0, 4) + '-01-01';
             const baseDs = document.getElementById('fzBase').value || todayStr();
+            const periods = fzPeriods(day);
             const pt = p => p == null ? '—' : p + '%';
             let out = `【Frozen 生產進度日報】統計日 ${day}\n`;
             fzPlan.lines.forEach(line => {
-                const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
                 const { lineHr, oneHr, behindQty } = fzLineHours(line, day);
                 const nt = fzNowText(fzLineNow(line, day), day);
                 out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}\n`;
-                out += `　當天 ${pt(d.pct)}（應${Math.round(d.due)}／完${Math.round(d.done)}）｜當月 ${pt(m.pct)}｜今年 ${pt(y.pct)}\n`;
+                if (periods.length) {
+                    out += '　' + periods.map(p => {
+                        const s = fzStatRange(line, p.from, p.to);
+                        return `${p.label} ${pt(s.pct)}（應${Math.round(s.due)}／完${Math.round(s.done)}）`;
+                    }).join('｜') + '\n';
+                }
                 out += `　累計落後 ${Math.round(behindQty)} 台｜${fzHrText(lineHr, oneHr)}\n`;
                 out += `　現在：${nt.cur}\n　下一批：${nt.next}\n`;
             });
@@ -673,6 +704,13 @@
             if (d) fzDone = d;
             const mt = JSON.parse(localStorage.getItem('fzMeta') || 'null');
             if (mt) fzMeta = mt;
+            // 還原看板期間勾選
+            const sh = JSON.parse(localStorage.getItem('fzShow') || 'null');
+            if (sh) {
+                document.getElementById('fzShowDay').checked = sh.day !== false;
+                document.getElementById('fzShowMonth').checked = sh.month !== false;
+                document.getElementById('fzShowYear').checked = sh.year !== false;
+            }
             // 彙整表的出貨日／缺料：用事件代理，填完（blur）就存
             document.getElementById('fzLagTable').addEventListener('change', e => {
                 const t = e.target;
