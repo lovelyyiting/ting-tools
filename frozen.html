@@ -402,9 +402,13 @@
             const next = active.find(a => a !== cur && (a.first || '') > (cur.first || '')) || active.find(a => a !== cur) || null;
             return { cur, curLast, next };
         }
-        function fzNowText(now) {
-            if (!now) return { cur: '✅ 無未完批次', next: '' };
+        function fzNowText(now, day) {
+            if (!now) return { cur: '✅ 無未完批次', next: '無' };
             const c = now.cur;
+            // 完全沒回報過、且首批排程日還沒到 → 這條線根本還沒開線
+            if (!now.curLast && c.first && c.first > day) {
+                return { cur: `尚未開線（${c.first.slice(5)} 開線）`, next: `${c.batch}（排程 ${c.first.slice(5)} 起，尾數 ${Math.round(c.tail)}）` };
+            }
             const cur = `${c.batch}（尾數 ${Math.round(c.tail)}${now.curLast ? '，最近回報 ' + now.curLast.slice(5) : '，尚未回報'}）`;
             const next = now.next ? `${now.next.batch}（排程 ${now.next.first ? now.next.first.slice(5) : '—'} 起）` : '無';
             return { cur, next };
@@ -420,7 +424,7 @@
                 const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
                 const { lineHr, oneHr } = fzLineHours(line, day);
                 const warn = fzWarn(lineHr, oneHr);
-                const nt = fzNowText(fzLineNow(line, day));
+                const nt = fzNowText(fzLineNow(line, day), day);
                 const pcls = p => p == null ? 'gray' : p >= 100 ? 'green' : p >= 90 ? 'orange' : 'red';
                 const cls = warn ? 'red' : (d.pct != null ? pcls(d.pct) : pcls(m.pct));
                 const dTxt = d.pct == null ? (d.due > 0 ? '0%' : '—') : d.pct + '%';
@@ -447,7 +451,7 @@
             fzPlan.lines.forEach(line => {
                 const d = fzStatRange(line, day, day), m = fzStatRange(line, mFrom, day), y = fzStatRange(line, yFrom, day);
                 const { lineHr, oneHr, behindQty } = fzLineHours(line, day);
-                const nt = fzNowText(fzLineNow(line, day));
+                const nt = fzNowText(fzLineNow(line, day), day);
                 out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}\n`;
                 out += `　當天 ${pt(d.pct)}（應${Math.round(d.due)}／完${Math.round(d.done)}）｜當月 ${pt(m.pct)}｜今年 ${pt(y.pct)}\n`;
                 out += `　累計落後 ${Math.round(behindQty)} 台｜${fzHrText(lineHr, oneHr)}\n`;
