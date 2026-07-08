@@ -82,29 +82,43 @@
         .board-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; font-size: 14px; }
         .board-head label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
         .board-head input[type=date] { padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
-        .board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; padding-bottom: 14px; }
-        .bd-card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px 14px; cursor: pointer; border-left: 6px solid #ccc; background: #fffdf9; }
+        .board-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding-bottom: 14px; }
+        .bd-card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 14px 16px; cursor: pointer; border-left: 6px solid #ccc; background: #fffdf9; }
         .bd-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.12); }
         .bd-card.green { border-left-color: #28a745; }
         .bd-card.orange { border-left-color: #fd7e14; }
         .bd-card.red { border-left-color: #dc3545; }
         .bd-card.gray { border-left-color: #ccc; }
-        .bd-line { font-size: 14px; font-weight: bold; color: #55503f; margin-bottom: 4px; }
-        .bd-pct { font-size: 30px; font-weight: bold; line-height: 1.1; }
+        .bd-line { font-size: 19px; font-weight: bold; color: #55503f; margin-bottom: 4px; }
+        .bd-pct { font-size: 40px; font-weight: bold; line-height: 1.1; }
         .bd-pct.green { color: #28a745; }
         .bd-pct.orange { color: #fd7e14; }
         .bd-pct.red { color: #dc3545; }
         .bd-pct.gray { color: #aaa; }
-        .bd-sub { font-size: 12.5px; color: #777; margin-top: 6px; line-height: 1.6; }
+        .bd-sub { font-size: 15px; color: #666; margin-top: 6px; line-height: 1.65; }
         .bd-behind { font-weight: bold; }
         .bd-behind.neg { color: #dc3545; }
         .bd-behind.pos { color: #28a745; }
-        .bd-mini { font-size: 12px; color: #888; margin-top: 6px; line-height: 1.5; }
+        .bd-mini { font-size: 14px; color: #777; margin-top: 6px; line-height: 1.55; }
         .bd-warn {
-            background: #dc3545; color: white; font-size: 11px; font-weight: normal;
-            padding: 2px 8px; border-radius: 10px; margin-left: 4px; white-space: nowrap;
+            background: #dc3545; color: white; font-size: 12.5px; font-weight: normal;
+            padding: 2px 9px; border-radius: 10px; margin-left: 5px; white-space: nowrap;
         }
         .bd-now { border-top: 1px dashed #e0dcd0; margin-top: 6px; padding-top: 6px; }
+        /* 生管指示：需追趕／可落後 */
+        .bd-flagbar {
+            margin-top: 8px; padding: 7px 10px; border-radius: 8px;
+            font-size: 17px; font-weight: bold; text-align: center; letter-spacing: 1px;
+        }
+        .bd-flagbar.chase { background: #dc3545; color: white; }
+        .bd-flagbar.adjust { background: #2e7d32; color: white; }
+        .bd-flags { display: flex; gap: 6px; margin-top: 8px; }
+        .flag-btn {
+            flex: 1; border: 1.5px solid #ccc; background: white; color: #777;
+            padding: 7px 4px; border-radius: 8px; font-size: 13.5px; cursor: pointer; white-space: nowrap;
+        }
+        .flag-btn.chase.on { background: #dc3545; border-color: #dc3545; color: white; font-weight: bold; }
+        .flag-btn.adjust.on { background: #2e7d32; border-color: #2e7d32; color: white; font-weight: bold; }
         /* 落後彙整表 */
         tr.lag-sub td { background: #f7f4ec; font-weight: bold; color: #6e5a3a; }
         input.meta-in { padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
@@ -174,7 +188,7 @@
             說明：<b>基準日預設＝昨天</b>，也就是每天看「截至昨天（含昨天）」的進度：應完成＝排程日 ≤ 基準日的計劃量合計；累計完成＝已輸入的每日完成量合計（≤ 基準日）；尾數＝MO量（無則用排程總量）− 累計完成；達成率＝累計完成 ÷ 應完成；落後＝應完成 − 累計完成（紅字＝落後、綠字＝超前）。<br>
             落後(時)依各線排產邏輯：有「每小時產出」的線（智能-1/智能-2）＝落後台數 ÷ 每小時產出 →（線）＝<b>整條線的落後時間</b>；用「工時(秒/台)」的線（智能-3／預組區／精密機電／售服）＝落後台數 × 工時 ÷ 3600 →（1人）＝<b>1 人工時</b>。上方彙總晶片會分開加總。<br>
             「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
-            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
+            <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>生管指示</b>：每張卡下方可點「⚡ 需追趕」或「🛠 可落後·生管調整」告知現場（再點一次取消），全員同步看到，日報也會帶出。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
             <b>每週更新 Frozen 表</b>：先在「匯入起算日」選新排程生效日（例如下週一），再匯入新檔 → 只會替換該日（含）之後的排程；之前的排程、期初落後、尾數基準與已填完成量都保留。留空匯入＝整批覆蓋。
         </div>
     </div>
@@ -185,6 +199,7 @@
         let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
         let fzDone = {};                              // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
         let fzMeta = {};                              // toolbox/frozen/meta  {lineSan:{batchSan:{ship,short}}}
+        let fzChase = {};                             // toolbox/frozen/chase {lineSan:true} 追趕中標記
         let fzLine = '';
 
         const FZ_ALIAS = {
@@ -428,6 +443,15 @@
             ];
             return all.filter(p => document.getElementById(p.id).checked);
         }
+        // 生管指示：'chase'=需追趕、'adjust'=可落後(生管調整)、再點一次取消；全員同步看到
+        function fzToggleChase(lk, val) {
+            const cur = fzChase[lk] === true ? 'chase' : fzChase[lk];   // 相容舊布林值
+            const next = cur === val ? '' : val;
+            if (next) fzChase[lk] = next; else delete fzChase[lk];
+            localStorage.setItem('fzChase', JSON.stringify(fzChase));
+            if (db) db.ref('toolbox/frozen/chase/' + lk).set(next || null);
+            fzBoard();
+        }
         function fzShowChange() {
             localStorage.setItem('fzShow', JSON.stringify({
                 day: document.getElementById('fzShowDay').checked,
@@ -457,6 +481,9 @@
                 const mainTxt = main ? (main.pct == null ? (main.due > 0 ? '0%' : '—') : main.pct + '%') : '';
                 const subLines = stats.slice(main ? 1 : 0).map(s =>
                     `${s.label} ${pctTag(s.pct)}（應 ${Math.round(s.due)}・完成 ${Math.round(s.done)}）`).join('<br>');
+                const lk = san(line.name);
+                const st = fzChase[lk] === true ? 'chase' : (fzChase[lk] || '');
+                const lkq = lk.replace(/'/g, "\\'");
                 return `<div class="bd-card ${cls}" onclick="fzPick('${line.name.replace(/'/g, "\\'")}')" title="點卡片看 ${esc(line.name)} 明細">
                     <div class="bd-line">${esc(line.name)}${warn ? '<span class="bd-warn">⚠️ 落後警訊</span>' : ''}</div>
                     ${main ? `<div class="bd-pct ${pcls(main.pct)}">${mainTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> ${esc(main.label)}</span></div>
@@ -464,6 +491,12 @@
                     (subLines ? `<div class="bd-sub">${subLines}</div>` : '')}
                     <div class="bd-mini">總落後時數：<span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}">${fzHrText(lineHr, oneHr)}</span></div>
                     <div class="bd-mini bd-now">▶ 現在：${esc(nt.cur)}<br>⏭ 下一批：${esc(nt.next)}</div>
+                    ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕，請現場加速</div>' : ''}
+                    ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可先落後，生管調整中</div>' : ''}
+                    <div class="bd-flags" onclick="event.stopPropagation()">
+                        <button class="flag-btn chase ${st === 'chase' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'chase')">⚡ 需追趕</button>
+                        <button class="flag-btn adjust ${st === 'adjust' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'adjust')">🛠 可落後·生管調整</button>
+                    </div>
                 </div>`;
             }).join('');
         }
@@ -478,7 +511,8 @@
             fzPlan.lines.forEach(line => {
                 const { lineHr, oneHr, behindQty } = fzLineHours(line, day);
                 const nt = fzNowText(fzLineNow(line, day), day);
-                out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}\n`;
+                const st = fzChase[san(line.name)] === true ? 'chase' : fzChase[san(line.name)];
+                out += `\n■ ${line.name}${fzWarn(lineHr, oneHr) ? '　⚠️ 落後警訊' : ''}${st === 'chase' ? '　⚡ 需追趕' : st === 'adjust' ? '　🛠 可落後（生管調整中）' : ''}\n`;
                 if (periods.length) {
                     out += '　' + periods.map(p => {
                         const s = fzStatRange(line, p.from, p.to);
@@ -704,6 +738,8 @@
             if (d) fzDone = d;
             const mt = JSON.parse(localStorage.getItem('fzMeta') || 'null');
             if (mt) fzMeta = mt;
+            const ch = JSON.parse(localStorage.getItem('fzChase') || 'null');
+            if (ch) fzChase = ch;
             // 還原看板期間勾選
             const sh = JSON.parse(localStorage.getItem('fzShow') || 'null');
             if (sh) {
@@ -736,6 +772,10 @@
                 db.ref('toolbox/frozen/meta').on('value', s => {
                     const v = s.val() || {};
                     fzMeta = v; localStorage.setItem('fzMeta', JSON.stringify(v)); fzLag();
+                });
+                db.ref('toolbox/frozen/chase').on('value', s => {
+                    const v = s.val() || {};
+                    fzChase = v; localStorage.setItem('fzChase', JSON.stringify(v)); fzBoard();
                 });
             }
             fzRenderAll();
