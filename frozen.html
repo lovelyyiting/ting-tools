@@ -142,6 +142,9 @@
         input.meta-in { padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12.5px; }
         input.meta-in.filled { border-color: #7a8663; background: #f3f6ee; }
         input.meta-in.short { width: 160px; }
+        input.meta-in.num { width: 66px; text-align: right; }
+        input.meta-in.idn { width: 112px; }
+        tr.lag-hidden td { opacity: 0.5; background: #f5f5f5; }
         /* 排程調整（順延／跳批／新增） */
         tr.fa-date td { background: #e9edda; font-weight: bold; color: #4d5a3a; border-top: 2px solid #b9c2a3; }
         tr.fa-date.fa-wknd td { background: #f6e7d8; color: #a05a2c; }
@@ -712,58 +715,103 @@
             location.href = 'mailto:?subject=' + encodeURIComponent(`Frozen 生產進度日報 ${day}`) + '&body=' + encodeURIComponent(body);
         }
 
-        // ===== 各產線落後彙整表（出貨日、缺料可自填，自動儲存）=====
+        // ===== 各產線落後彙整表（每欄可覆寫、每列可刪除；清空欄位＝恢復自動計算）=====
+        // 效值：有覆寫（fzMeta）用覆寫，否則用自動彙總 a。落後(台)/(時)沒覆寫時隨應完成/累計完成連動
+        function fzLagEff(a, m) {
+            m = m || {};
+            const has = v => v != null && v !== '';
+            const due = has(m.due) ? num(m.due) : a.due;
+            const done = has(m.done) ? num(m.done) : a.done;
+            const behind = has(m.behind) ? num(m.behind) : (due - done);
+            let behindHr, hrBase;
+            if (has(m.behindHr)) { behindHr = num(m.behindHr); hrBase = a.hrBase || '—'; }
+            else if (a.rate > 0) { behindHr = behind / a.rate; hrBase = '線'; }
+            else if (a.sec > 0) { behindHr = behind * a.sec / 3600; hrBase = '1人'; }
+            else { behindHr = null; hrBase = ''; }
+            return {
+                batch: has(m.batch) ? m.batch : a.batch,
+                part: has(m.part) ? m.part : a.part,
+                wo: has(m.wo) ? m.wo : a.wo,
+                due, done, behind, behindHr, hrBase,
+                ship: m.ship || '', short: m.short || '', hidden: !!m.hidden
+            };
+        }
+        // 落後批次列（含效值與覆寫記號），供表格／匯出／日報共用
+        function fzLagRows(line, baseDs) {
+            const lk = san(line.name);
+            return fzAggregate(line, baseDs).filter(a => a.behind > 0.01).map(a => {
+                const key = san(a.batch + '|' + a.part);
+                const m = (fzMeta[lk] || {})[key] || {};
+                return { lk, key, a, m, eff: fzLagEff(a, m) };
+            });
+        }
+
         function fzLag() {
             const sec = document.getElementById('fzLagSec');
             const table = document.getElementById('fzLagTable');
             if (!fzPlan.lines.length) { sec.style.display = 'none'; return; }
             sec.style.display = '';
             const baseDs = document.getElementById('fzBase').value || todayStr();
-            document.getElementById('fzLagHint').textContent = `基準日：${baseDs}・列出「應完成 > 累計完成」的批次，出貨日／缺料填完自動儲存並同步`;
-            const head = `<tr><th>產線</th><th>批次</th><th>料號</th><th>工單</th><th>應完成</th><th>累計完成</th><th>落後(台)</th><th>落後(時)</th><th>出貨日</th><th>缺料狀況</th></tr>`;
+            document.getElementById('fzLagHint').textContent = `基準日：${baseDs}・每個欄位都能改（清空＝恢復自動值、藍框＝已手改）、每列可刪除，改完自動儲存並同步`;
+            const head = `<tr><th>產線</th><th>批次</th><th>料號</th><th>工單</th><th>應完成</th><th>累計完成</th><th>落後(台)</th><th>落後(時)</th><th>出貨日</th><th>缺料狀況</th><th>刪除</th></tr>`;
+            // 可編輯欄位小工具
+            const inTxt = (lk, key, f, val, over, cls, ph) =>
+                `<input type="text" class="meta-in ${cls || ''} ${over ? 'filled' : ''}" value="${esc(val)}"${ph ? ` placeholder="${esc(ph)}"` : ''} data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="${f}">`;
+            const inNum = (lk, key, f, val, over, neg) =>
+                `<input type="number" step="any" class="meta-in num ${over ? 'filled' : ''}" style="${neg ? 'color:#dc3545;font-weight:bold;' : (val <= 0 ? 'color:#28a745;font-weight:bold;' : '')}" value="${val}" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="${f}">`;
             let html = head, any = false;
             fzPlan.lines.forEach(line => {
                 const lk = san(line.name);
-                const rows = fzAggregate(line, baseDs).filter(a => a.behind > 0.01);
+                const rows = fzLagRows(line, baseDs);
                 if (!rows.length) return;
                 any = true;
                 let subQty = 0, subLineHr = 0, subOneHr = 0;
-                rows.forEach(a => {
-                    const key = san(a.batch + '|' + a.part);
-                    const meta = (fzMeta[lk] || {})[key] || {};
-                    subQty += a.behind;
-                    if (a.hrBase === '線' && a.behindHr != null) subLineHr += a.behindHr;
-                    if (a.hrBase === '1人' && a.behindHr != null) subOneHr += a.behindHr;
+                rows.forEach(({ key, a, m, eff }) => {
+                    if (eff.hidden) {
+                        html += `<tr class="behind lag-hidden">
+                            <td>${esc(line.name)}</td><td>${esc(eff.batch)}</td><td>${esc(eff.part)}</td>
+                            <td colspan="7" style="color:#999;">（已從彙整移除，不計入小計／日報／匯出）</td>
+                            <td><button class="fa-mini" style="background:#7a8663;" onclick="fzLagToggleHide('${esc(lk)}','${esc(key)}',false)">↩︎ 恢復</button></td>
+                        </tr>`;
+                        return;
+                    }
+                    subQty += eff.behind;
+                    if (eff.hrBase === '線' && eff.behindHr != null) subLineHr += eff.behindHr;
+                    if (eff.hrBase === '1人' && eff.behindHr != null) subOneHr += eff.behindHr;
+                    const hrVal = eff.behindHr != null ? Math.round(eff.behindHr * 10) / 10 : '';
                     html += `<tr class="behind">
-                        <td>${esc(line.name)}</td><td>${esc(a.batch)}</td><td>${esc(a.part)}</td><td>${esc(a.wo)}</td>
-                        <td>${Math.round(a.due)}</td><td>${Math.round(a.done)}</td>
-                        <td class="neg">${Math.round(a.behind)}</td>
-                        <td class="neg">${a.behindHr != null ? (Math.round(a.behindHr * 10) / 10) + '(' + a.hrBase + ')' : '—'}</td>
-                        <td><input type="date" class="meta-in ${meta.ship ? 'filled' : ''}" value="${esc(meta.ship || '')}" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="ship"></td>
-                        <td><input type="text" class="meta-in short ${meta.short ? 'filled' : ''}" value="${esc(meta.short || '')}" placeholder="缺什麼料？沒缺免填" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="short"></td>
+                        <td>${esc(line.name)}</td>
+                        <td>${inTxt(lk, key, 'batch', eff.batch, m.batch != null && m.batch !== '', 'idn')}</td>
+                        <td>${inTxt(lk, key, 'part', eff.part, m.part != null && m.part !== '', 'idn')}</td>
+                        <td>${inTxt(lk, key, 'wo', eff.wo, m.wo != null && m.wo !== '', 'idn')}</td>
+                        <td>${inNum(lk, key, 'due', Math.round(eff.due), m.due != null && m.due !== '', false)}</td>
+                        <td>${inNum(lk, key, 'done', Math.round(eff.done), m.done != null && m.done !== '', false)}</td>
+                        <td>${inNum(lk, key, 'behind', Math.round(eff.behind), m.behind != null && m.behind !== '', eff.behind > 0.01)}</td>
+                        <td><input type="number" step="any" class="meta-in num ${m.behindHr != null && m.behindHr !== '' ? 'filled' : ''}" style="${eff.behind > 0.01 ? 'color:#dc3545;font-weight:bold;' : ''}" value="${hrVal}" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="behindHr"><span style="font-size:11px;color:#999;">${eff.hrBase ? '(' + eff.hrBase + ')' : ''}</span></td>
+                        <td><input type="date" class="meta-in ${m.ship ? 'filled' : ''}" value="${esc(eff.ship)}" data-lk="${esc(lk)}" data-key="${esc(key)}" data-f="ship"></td>
+                        <td>${inTxt(lk, key, 'short', eff.short, !!m.short, 'short', '缺什麼料？沒缺免填')}</td>
+                        <td><button class="fa-mini" style="background:#c0392b;" title="從彙整移除（可恢復）" onclick="fzLagToggleHide('${esc(lk)}','${esc(key)}',true)">🗑</button></td>
                     </tr>`;
                 });
                 html += `<tr class="lag-sub"><td colspan="6">📌 ${esc(line.name)} 小計（總落後）</td>
-                    <td>${Math.round(subQty)} 台</td><td colspan="3">${fzHrText(subLineHr, subOneHr)}</td></tr>`;
+                    <td>${Math.round(subQty)} 台</td><td colspan="4">${fzHrText(subLineHr, subOneHr)}</td></tr>`;
             });
-            table.innerHTML = any ? html : head + `<tr><td colspan="10"><div class="empty-hint">目前沒有落後批次 🎉</div></td></tr>`;
+            table.innerHTML = any ? html : head + `<tr><td colspan="11"><div class="empty-hint">目前沒有落後批次 🎉</div></td></tr>`;
         }
-        // 組落後彙整的匯出資料（含各線小計列）
+        // 組落後彙整的匯出資料（套用覆寫、跳過已刪除；含各線小計列）
         function fzLagAoa(baseDs, withSub) {
             const aoa = [['產線', '批次', '料號', '工單', '應完成(≤' + baseDs + ')', '累計完成', '落後(台)', '落後(時)', '出貨日', '缺料狀況']];
             fzPlan.lines.forEach(line => {
-                const lk = san(line.name);
-                const rows = fzAggregate(line, baseDs).filter(a => a.behind > 0.01);
+                const rows = fzLagRows(line, baseDs).filter(r => !r.eff.hidden);
                 if (!rows.length) return;
                 let subQty = 0, subLineHr = 0, subOneHr = 0;
-                rows.forEach(a => {
-                    const meta = (fzMeta[lk] || {})[san(a.batch + '|' + a.part)] || {};
-                    subQty += a.behind;
-                    if (a.hrBase === '線' && a.behindHr != null) subLineHr += a.behindHr;
-                    if (a.hrBase === '1人' && a.behindHr != null) subOneHr += a.behindHr;
-                    aoa.push([line.name, a.batch, a.part, a.wo, Math.round(a.due), Math.round(a.done),
-                        Math.round(a.behind), a.behindHr != null ? Math.round(a.behindHr * 10) / 10 : '',
-                        meta.ship || '', meta.short || '']);
+                rows.forEach(({ eff }) => {
+                    subQty += eff.behind;
+                    if (eff.hrBase === '線' && eff.behindHr != null) subLineHr += eff.behindHr;
+                    if (eff.hrBase === '1人' && eff.behindHr != null) subOneHr += eff.behindHr;
+                    aoa.push([line.name, eff.batch, eff.part, eff.wo, Math.round(eff.due), Math.round(eff.done),
+                        Math.round(eff.behind), eff.behindHr != null ? Math.round(eff.behindHr * 10) / 10 : '',
+                        eff.ship || '', eff.short || '']);
                 });
                 if (withSub) aoa.push([line.name + ' 小計', '', '', '', '', '', Math.round(subQty), fzHrText(subLineHr, subOneHr), '', '']);
             });
@@ -786,6 +834,16 @@
             if (!Object.keys(fzMeta[lk]).length) delete fzMeta[lk];
             localStorage.setItem('fzMeta', JSON.stringify(fzMeta));
             // 只寫這一批次的欄位，避免蓋掉別人同時填的資料
+            if (db) db.ref('toolbox/frozen/meta/' + lk + '/' + key).set((fzMeta[lk] && fzMeta[lk][key]) || null);
+            fzLag();
+        }
+        // 刪除／恢復一列（存 hidden 旗標，全員同步，可再恢復）
+        function fzLagToggleHide(lk, key, hide) {
+            fzMeta[lk] = fzMeta[lk] || {}; fzMeta[lk][key] = fzMeta[lk][key] || {};
+            if (hide) fzMeta[lk][key].hidden = true; else delete fzMeta[lk][key].hidden;
+            if (!Object.keys(fzMeta[lk][key]).length) delete fzMeta[lk][key];
+            if (!Object.keys(fzMeta[lk]).length) delete fzMeta[lk];
+            localStorage.setItem('fzMeta', JSON.stringify(fzMeta));
             if (db) db.ref('toolbox/frozen/meta/' + lk + '/' + key).set((fzMeta[lk] && fzMeta[lk][key]) || null);
             fzLag();
         }
