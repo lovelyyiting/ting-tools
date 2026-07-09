@@ -82,6 +82,22 @@
                 <table class="data" id="pdTable"></table>
             </div>
         </div>
+
+        <!-- 篩選料號開頭的小欄（同上方日期與來源）-->
+        <div style="border-top: 8px solid #efe9dc;"></div>
+        <div style="padding: 14px 20px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <span style="font-weight: bold; color: #55503f;">📌 只計料號開頭</span>
+            <input id="pdPrefix" value="400" oninput="pdRender()" style="width: 90px; padding: 6px 8px; border: 1px solid #bd8a63; border-radius: 6px; font-size: 14px; background: #fff8f0;">
+            <span style="font-size: 12px; color: #999;">（例如 400＝智能線整車料號；日期與來源同上方）</span>
+            <button class="export-btn" onclick="pdExport(document.getElementById('pdPrefix').value.trim())">⬇️ 匯出這欄</button>
+        </div>
+        <div class="sumbar" id="pdSum400"></div>
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="pdTable400"></table>
+            </div>
+        </div>
+
         <div class="note">
             說明：<b>車種</b>由批次名自動歸類（SC3.22 No.108＋No.121 都算 SC3.22；批次含「重工」歸「重工」）。<b>同一批每天只算一次</b>——智能-3／精密機電同批的「半品完成／烤箱前／膠乾前」等多道工序、跨產線同批不會重複加總（取該批當天最大量）。點任一車種可<b>展開明細</b>，看它包含哪些日期／產線／批次／料號（主管詢問時可交代）。數量可切換<b>排程量</b>（計畫）或<b>完成量</b>（每天實際回報）。
         </div>
@@ -92,7 +108,8 @@
         let fzPlan = { updatedAt: '', lines: [] };
         let fzDone = {};
         let pdSrc = 'plan';
-        const pdOpen = {};   // 展開的車種
+        const pdOpen = {};      // 主表展開的車種
+        const pdOpen400 = {};   // 篩選欄展開的車種
         const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
 
         // 工序尾巴：同一批的不同製程階段
@@ -113,12 +130,14 @@
             return b || raw;
         }
 
-        // 蒐集期間內的生產事件：{date,line,batch,part,desc,qty}
-        function pdEvents(from, to) {
+        // 蒐集期間內的生產事件：{date,line,batch,part,desc,qty}；prefix＝只留料號開頭符合的（空＝全部）
+        function pdEvents(from, to, prefix) {
+            const pk = String(prefix || '').trim();
+            const keep = p => !pk || String(p || '').trim().startsWith(pk);
             const ev = [];
             if (pdSrc === 'plan') {
                 fzPlan.lines.forEach(l => (l.rows || []).forEach(r => {
-                    if (r.date && r.date >= from && r.date <= to && num(r.plan) > 0)
+                    if (r.date && r.date >= from && r.date <= to && num(r.plan) > 0 && keep(r.part))
                         ev.push({ date: r.date, line: l.name, batch: r.batch, part: r.part, desc: r.desc || '', qty: num(r.plan) });
                 }));
             } else {
@@ -129,6 +148,7 @@
                     Object.entries(batches || {}).forEach(([bk, rec]) => {
                         let info = bmap[bk];
                         if (!info) { const i = bk.lastIndexOf('|'); info = { batch: i >= 0 ? bk.slice(0, i) : bk, part: i >= 0 ? bk.slice(i + 1) : '', desc: '' }; }
+                        if (!keep(info.part)) return;
                         Object.entries(rec || {}).forEach(([d, q]) => {
                             if (d >= from && d <= to && num(q) > 0)
                                 ev.push({ date: d, line, batch: info.batch, part: info.part, desc: info.desc, qty: num(q) });
@@ -164,32 +184,34 @@
             return Object.values(g).sort((a, b) => b.qty - a.qty);
         }
 
-        function pdData() {
+        function pdData(prefix) {
             const from = document.getElementById('pdFrom').value, to = document.getElementById('pdTo').value;
             if (!from || !to || from > to) return { from, to, groups: [], total: 0, batchN: 0 };
-            const deduped = pdDedup(pdEvents(from, to));
+            const deduped = pdDedup(pdEvents(from, to, prefix));
             const groups = pdGroup(deduped);
             return { from, to, groups, total: groups.reduce((s, g) => s + g.qty, 0), batchN: deduped.length };
         }
 
-        function pdRender() {
-            const { from, to, groups, total, batchN } = pdData();
+        // 把一組資料畫進指定的彙總列與表格；openMap＝該欄的展開狀態、scope＝pdToggle 用來分辨哪一欄
+        function pdRenderPanel(sumId, tableId, prefix, openMap, scope) {
+            const { from, to, groups, total, batchN } = pdData(prefix);
             const srcLabel = pdSrc === 'plan' ? '排程量' : '完成量';
-            document.getElementById('pdSum').innerHTML =
+            document.getElementById(sumId).innerHTML =
                 `<span class="chip olive">${esc(from || '—')} ～ ${esc(to || '—')}</span>` +
                 `<span class="chip">來源：${srcLabel}</span>` +
+                (prefix ? `<span class="chip">料號 ${esc(prefix)} 開頭</span>` : '') +
                 `<span class="chip green">${groups.length} 個車種</span>` +
                 `<span class="chip green">總量 ${Math.round(total)} 台（${batchN} 批）</span>`;
-            const table = document.getElementById('pdTable');
+            const table = document.getElementById(tableId);
             const head = `<tr><th>車種</th><th class="num">批數</th><th class="num">總量（${srcLabel}）</th><th></th></tr>`;
             if (!groups.length) {
-                table.innerHTML = head + `<tr><td colspan="4"><div class="empty-hint">${from && to ? '這個區段沒有資料' : '請選日期區段'}${pdSrc === 'done' ? '<br>（完成量＝每天實際回報的量，沒回報的日子為 0）' : ''}</div></td></tr>`;
+                table.innerHTML = head + `<tr><td colspan="4"><div class="empty-hint">${from && to ? '這個區段沒有資料' : '請選日期區段'}${prefix ? `（料號 ${esc(prefix)} 開頭）` : ''}${pdSrc === 'done' ? '<br>（完成量＝每天實際回報的量，沒回報的日子為 0）' : ''}</div></td></tr>`;
                 return;
             }
             let html = head;
             groups.forEach(g => {
-                const open = pdOpen[g.model];
-                html += `<tr class="model-row" onclick="pdToggle('${esc(g.model).replace(/'/g, "\\'")}')">
+                const open = openMap[g.model];
+                html += `<tr class="model-row" onclick="pdToggle('${scope}','${esc(g.model).replace(/'/g, "\\'")}')">
                     <td>${open ? '▼' : '▶'} ${esc(g.model)}</td>
                     <td class="num">${g.items.length}</td>
                     <td class="num"><b>${Math.round(g.qty)}</b></td>
@@ -207,7 +229,17 @@
             table.innerHTML = html;
         }
 
-        function pdToggle(model) { pdOpen[model] = !pdOpen[model]; pdRender(); }
+        function pdRender() {
+            pdRenderPanel('pdSum', 'pdTable', '', pdOpen, 'all');
+            pdRenderPanel('pdSum400', 'pdTable400', pdPrefix(), pdOpen400, 'sub');
+        }
+        const pdPrefix = () => document.getElementById('pdPrefix').value.trim();
+
+        function pdToggle(scope, model) {
+            const map = scope === 'sub' ? pdOpen400 : pdOpen;
+            map[model] = !map[model];
+            pdRender();
+        }
         function pdSetSrc(s) {
             pdSrc = s;
             document.getElementById('srcPlan').classList.toggle('active', s === 'plan');
@@ -229,11 +261,13 @@
             pdRender();
         }
 
-        function pdExport() {
-            const { from, to, groups, total } = pdData();
+        function pdExport(prefix) {
+            prefix = String(prefix || '').trim();
+            const { from, to, groups, total } = pdData(prefix);
             if (!groups.length) { alert('這個區段沒有資料'); return; }
             const srcLabel = pdSrc === 'plan' ? '排程量' : '完成量';
-            const sumAoa = [[`車種產量彙總（${from}～${to}・${srcLabel}）`], ['車種', '批數', '總量']];
+            const tag = prefix ? `・料號${prefix}開頭` : '';
+            const sumAoa = [[`車種產量彙總（${from}～${to}・${srcLabel}${tag}）`], ['車種', '批數', '總量']];
             const detAoa = [['車種', '日期', '批次', '料號', '品名/規格', '量', '產線／工序']];
             groups.forEach(g => {
                 sumAoa.push([g.model, g.items.length, Math.round(g.qty)]);
@@ -246,7 +280,7 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '車種彙總');
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detAoa), '明細');
-            XLSX.writeFile(wb, `車種產量_${srcLabel}_${from.replace(/-/g, '')}-${to.replace(/-/g, '')}.xlsx`);
+            XLSX.writeFile(wb, `車種產量_${srcLabel}${prefix ? '_' + prefix + '開頭' : ''}_${from.replace(/-/g, '')}-${to.replace(/-/g, '')}.xlsx`);
         }
 
         // ===== 初始化 =====
