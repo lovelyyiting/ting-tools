@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>料號工時彙整</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container {
+            max-width: 1200px; margin: 0 auto; background: white;
+            border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white; padding: 20px; text-align: center; position: relative;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link {
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: white; text-decoration: none; font-size: 14px;
+            background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px;
+        }
+        .toolbar {
+            display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px;
+            border-bottom: 1px solid #eee; align-items: center; font-size: 14px;
+        }
+        .imp-btn { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .export-btn { border: 1px solid #ccc; background: white; padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+        .search-in { flex: 1; min-width: 180px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+        .planstat { font-size: 12px; color: #999; padding: 8px 20px 0; }
+        .panel { padding: 12px 20px 30px; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 70vh; overflow-y: auto; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 820px; }
+        table.data th { background: #f5f6fa; padding: 8px 7px; text-align: left; color: #555; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+        table.data td { padding: 6px 7px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+        td.num { text-align: right; white-space: nowrap; }
+        .unset { color: #c0392b; }
+        .wt-mini { border: none; border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: white; background: #7a8663; }
+        .hist-btn { border: 1px solid #cdc4ad; background: #faf7ef; border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; color: #6e5a3a; }
+        .hist { margin-top: 6px; font-size: 12px; color: #6e5a3a; background: #faf7ef; border: 1px solid #ece3cf; border-radius: 6px; padding: 6px 8px; line-height: 1.7; }
+        .hist .cur { font-weight: bold; color: #2b6b2b; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; line-height: 1.9; }
+        .note { font-size: 12px; color: #999; padding: 10px 20px 24px; line-height: 1.7; }
+        .fa-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; padding: 15px; }
+        .fa-modal.active { display: flex; }
+        .fa-box { background: white; border-radius: 10px; padding: 20px; width: 100%; max-width: 430px; max-height: 90vh; overflow-y: auto; }
+        .fa-box h3 { text-align: center; color: #55503f; margin-bottom: 10px; }
+        .fa-lb { font-size: 13px; font-weight: bold; color: #555; display: block; margin: 9px 0 4px; }
+        .fa-in { width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .fa-btns { display: flex; gap: 10px; margin-top: 16px; }
+        .fa-btns button { flex: 1; }
+        .fa-cancel { border: 1px solid #ccc; background: white; padding: 9px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>⏱️ 料號工時彙整</h1>
+            <p>各料號工時的唯一來源，含生效日與修改歷程；Frozen 落後時數、尾數、排程都抓這裡的工時</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="imp-btn" onclick="wtSeed()">📥 從 Frozen 排程帶入料號</button>
+            <button class="export-btn" onclick="wtExport()">⬇️ 匯出工時＋歷程</button>
+            <input class="search-in" id="wtSearch" placeholder="🔍 搜尋料號 / 品名" oninput="wtRender()">
+            <label style="display:flex;align-items:center;gap:5px;color:#555;"><input type="checkbox" id="wtUnsetOnly" onchange="wtRender()"> 只看未設定</label>
+        </div>
+
+        <div class="planstat" id="wtStat">載入中…</div>
+
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="wtTable"></table>
+            </div>
+        </div>
+        <div class="note">
+            說明：每個料號記兩種工時——<b>每小時產出</b>（智能線用）與<b>工時(秒/台)</b>（其他線用），有值的那個會被採用。更新工時時要填<b>生效日</b>：例如某料號原本 100 秒，7/20 改成 90 秒，則 7/20（含）之後的批次用 90 秒、之前仍用 100 秒（<b>依生效日回溯</b>）。每次修改都會留一筆歷程（生效日＋修改時間），點「歷程」可展開。Frozen 進度追蹤的落後時數、尾數換算、排程調整的預計工時都會依各批排程日抓對應生效的工時。
+        </div>
+    </div>
+
+    <!-- 更新工時 -->
+    <div id="wtModal" class="fa-modal">
+        <div class="fa-box">
+            <h3 id="wtModalTitle">更新工時</h3>
+            <label class="fa-lb">料號 *</label>
+            <input type="text" id="wtPart" class="fa-in">
+            <label class="fa-lb">品名 / 規格</label>
+            <input type="text" id="wtDesc" class="fa-in">
+            <div style="display:flex;gap:10px;">
+                <div style="flex:1;"><label class="fa-lb">每小時產出（智能線）</label><input type="number" step="any" id="wtRate" class="fa-in" placeholder="智能線填這個"></div>
+                <div style="flex:1;"><label class="fa-lb">工時(秒/台)（其他線）</label><input type="number" step="any" id="wtSec" class="fa-in" placeholder="其他線填這個"></div>
+            </div>
+            <label class="fa-lb">生效日 *（從這天起的批次用此工時）</label>
+            <input type="date" id="wtFrom" class="fa-in">
+            <div id="wtCurHint" style="font-size:12px;color:#888;margin-top:8px;"></div>
+            <div class="fa-btns">
+                <button class="imp-btn" onclick="wtSaveEntry()">儲存這筆工時</button>
+                <button class="fa-cancel" onclick="document.getElementById('wtModal').classList.remove('active')">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260709a"></script>
+    <script>
+        let wtData = {};          // toolbox/worktime
+        let fzPlan = { updatedAt: '', lines: [] };   // 讀 Frozen 排程只為了帶出料號清單與 Frozen 表內建工時
+        const wtExpanded = {};    // 展開歷程的料號
+
+        // 從 Frozen 排程蒐集所有料號：part → {desc, rate, sec, first}
+        function wtPlanParts() {
+            const parts = {};
+            (fzPlan.lines || []).forEach(l => (l.rows || []).forEach(r => {
+                if (!r.part) return;
+                const p = parts[r.part] = parts[r.part] || { part: r.part, desc: r.desc || '', rate: 0, sec: 0, first: '' };
+                if (num(r.rate) > p.rate) p.rate = num(r.rate);
+                if (num(r.sec) > p.sec) p.sec = num(r.sec);
+                if (r.desc && !p.desc) p.desc = r.desc;
+                if (r.date && (!p.first || r.date < p.first)) p.first = r.date;
+            }));
+            return parts;
+        }
+
+        function wtRender() {
+            const stat = document.getElementById('wtStat');
+            const table = document.getElementById('wtTable');
+            const planParts = wtPlanParts();
+            // 料號清單＝工時表 ∪ 排程用到的料號
+            const keys = {};
+            Object.values(wtData).forEach(e => { if (e && e.part) keys[e.part] = true; });
+            Object.keys(planParts).forEach(p => keys[p] = true);
+            const allParts = Object.keys(keys).sort();
+            const q = document.getElementById('wtSearch').value.trim().toLowerCase();
+            const unsetOnly = document.getElementById('wtUnsetOnly').checked;
+            const setCnt = allParts.filter(p => wtLatest(wtData[wtKey(p)])).length;
+            stat.textContent = `共 ${allParts.length} 個料號，已設定工時 ${setCnt}、未設定 ${allParts.length - setCnt}${fzPlan.updatedAt ? '（排程更新於 ' + fzPlan.updatedAt + '）' : ''}`;
+
+            const head = '<tr><th>料號</th><th>品名/規格</th><th>每小時產出</th><th>工時(秒/台)</th><th>現行生效日</th><th>歷程</th><th>操作</th></tr>';
+            let rows = '', shown = 0;
+            allParts.forEach(part => {
+                if (q && !(part.toLowerCase().includes(q) || String((wtData[wtKey(part)] || planParts[part] || {}).desc || planParts[part]?.desc || '').toLowerCase().includes(q))) return;
+                const entry = wtData[wtKey(part)];
+                const cur = wtLatest(entry);
+                if (unsetOnly && cur) return;
+                shown++;
+                const pp = planParts[part] || {};
+                const desc = (entry && entry.desc) || pp.desc || '';
+                let rateCell, secCell, fromCell;
+                if (cur) {
+                    rateCell = num(cur.rate) > 0 ? num(cur.rate) : '—';
+                    secCell = num(cur.sec) > 0 ? num(cur.sec) : '—';
+                    fromCell = cur.from ? esc(cur.from) : '（起始）';
+                } else {
+                    // 尚未在工時表設定：顯示 Frozen 表內建值供參考
+                    const fb = [];
+                    if (pp.rate > 0) fb.push('每小時 ' + pp.rate);
+                    if (pp.sec > 0) fb.push(pp.sec + ' 秒');
+                    rateCell = pp.rate > 0 ? '<span class="unset">' + pp.rate + '*</span>' : '—';
+                    secCell = pp.sec > 0 ? '<span class="unset">' + pp.sec + '*</span>' : '—';
+                    fromCell = '<span class="unset">未設定</span>';
+                }
+                // 歷程
+                let histCell = '—';
+                if (entry && entry.history && entry.history.length) {
+                    const n = entry.history.length;
+                    histCell = `<button class="hist-btn" onclick="wtToggleHist('${esc(wtKey(part))}')">${wtExpanded[wtKey(part)] ? '▼' : '▶'} ${n} 筆</button>`;
+                    if (wtExpanded[wtKey(part)]) {
+                        const h = entry.history.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+                        const latestFrom = h[h.length - 1].from || '';
+                        histCell += '<div class="hist">' + h.map(e => {
+                            const parts2 = [];
+                            if (num(e.rate) > 0) parts2.push('每小時 ' + num(e.rate));
+                            if (num(e.sec) > 0) parts2.push(num(e.sec) + ' 秒');
+                            const isCur = (e.from || '') === latestFrom;
+                            return `<div class="${isCur ? 'cur' : ''}">・${e.from ? esc(e.from) : '（起始）'} 起：${parts2.join('／') || '—'}${isCur ? '（現行）' : ''}${e.at ? ' <span style="color:#aaa;">改於 ' + esc(e.at) + '</span>' : ''}</div>`;
+                        }).join('') + '</div>';
+                    }
+                }
+                rows += `<tr>
+                    <td><b>${esc(part)}</b></td><td style="color:#777;">${esc(desc)}</td>
+                    <td class="num">${rateCell}</td><td class="num">${secCell}</td>
+                    <td>${fromCell}</td><td>${histCell}</td>
+                    <td><button class="wt-mini" onclick="wtOpen('${esc(part).replace(/'/g, "\\'")}')">✏️ 更新</button></td>
+                </tr>`;
+            });
+            table.innerHTML = head + (shown ? rows : '<tr><td colspan="7"><div class="empty-hint">' + (allParts.length ? '沒有符合搜尋的料號' : '目前沒有料號，請先到 Frozen 進度追蹤匯入排程，再按「從 Frozen 排程帶入料號」') + '</div></td></tr>');
+        }
+
+        function wtToggleHist(k) { wtExpanded[k] = !wtExpanded[k]; wtRender(); }
+
+        // 開更新視窗（帶入現行值）
+        function wtOpen(part) {
+            const entry = wtData[wtKey(part)];
+            const cur = wtLatest(entry);
+            const pp = wtPlanParts()[part] || {};
+            document.getElementById('wtModalTitle').textContent = '更新工時：' + part;
+            document.getElementById('wtPart').value = part;
+            document.getElementById('wtPart').readOnly = true;
+            document.getElementById('wtDesc').value = (entry && entry.desc) || pp.desc || '';
+            document.getElementById('wtRate').value = cur && num(cur.rate) > 0 ? num(cur.rate) : (pp.rate > 0 ? pp.rate : '');
+            document.getElementById('wtSec').value = cur && num(cur.sec) > 0 ? num(cur.sec) : (pp.sec > 0 ? pp.sec : '');
+            document.getElementById('wtFrom').value = todayStr();
+            document.getElementById('wtCurHint').innerHTML = cur
+                ? `現行：${num(cur.rate) > 0 ? '每小時 ' + num(cur.rate) : ''}${num(cur.sec) > 0 ? num(cur.sec) + ' 秒' : ''}（${cur.from ? cur.from + ' 起' : '起始'}）。填新值＋生效日後，會新增一筆歷程。`
+                : (pp.rate > 0 || pp.sec > 0 ? `目前未設定，Frozen 表內建：${pp.rate > 0 ? '每小時 ' + pp.rate : ''}${pp.sec > 0 ? ' ' + pp.sec + ' 秒' : ''}（可直接沿用）。` : '目前未設定工時。');
+            document.getElementById('wtModal').classList.add('active');
+        }
+
+        function wtSaveEntry() {
+            const part = document.getElementById('wtPart').value.trim();
+            const desc = document.getElementById('wtDesc').value.trim();
+            const rate = num(document.getElementById('wtRate').value);
+            const sec = num(document.getElementById('wtSec').value);
+            const from = document.getElementById('wtFrom').value;
+            if (!part) { alert('請填料號'); return; }
+            if (rate <= 0 && sec <= 0) { alert('每小時產出、工時(秒) 至少填一個（大於 0）'); return; }
+            if (!from) { alert('請選生效日'); return; }
+            const k = wtKey(part);
+            const entry = wtData[k] || { part, desc, history: [] };
+            entry.part = part;
+            if (desc) entry.desc = desc;
+            entry.history = (entry.history || []).filter(e => (e.from || '') !== from);   // 同生效日覆蓋
+            entry.history.push({ from, rate, sec, at: new Date().toLocaleString('zh-TW') });
+            entry.history.sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+            wtData[k] = entry;
+            localStorage.setItem('wtData', JSON.stringify(wtData));
+            if (db) db.ref(WT_NODE + '/' + k).set(entry).catch(e => console.log('雲端儲存失敗', e));
+            document.getElementById('wtModal').classList.remove('active');
+            wtExpanded[k] = true;
+            wtRender();
+        }
+
+        // 一鍵帶入：排程用到、但工時表還沒有的料號，用 Frozen 表內建工時建立起始歷程
+        function wtSeed() {
+            const planParts = wtPlanParts();
+            const todo = Object.values(planParts).filter(p => !wtData[wtKey(p.part)] && (p.rate > 0 || p.sec > 0));
+            const noWt = Object.values(planParts).filter(p => !wtData[wtKey(p.part)] && !(p.rate > 0 || p.sec > 0));
+            if (!todo.length) {
+                alert(noWt.length
+                    ? `沒有可帶入的新料號。有 ${noWt.length} 個料號 Frozen 表也沒工時，請用「✏️ 更新」手動補。`
+                    : '工時表已涵蓋排程所有料號，沒有需要帶入的。');
+                return;
+            }
+            if (!confirm(`將把 ${todo.length} 個料號用 Frozen 表內建工時建立起始工時（生效日＝該料號最早排程日）。已設定過的不動。確定？`)) return;
+            todo.forEach(p => {
+                const k = wtKey(p.part);
+                const entry = { part: p.part, desc: p.desc || '', history: [{ from: p.first || '', rate: p.rate, sec: p.sec, at: new Date().toLocaleString('zh-TW') + '（帶入）' }] };
+                wtData[k] = entry;
+                if (db) db.ref(WT_NODE + '/' + k).set(entry).catch(e => console.log('雲端儲存失敗', e));
+            });
+            localStorage.setItem('wtData', JSON.stringify(wtData));
+            wtRender();
+            alert(`已帶入 ${todo.length} 個料號的起始工時${noWt.length ? `；另有 ${noWt.length} 個料號 Frozen 表沒工時，需手動補` : ''}。`);
+        }
+
+        function wtExport() {
+            const planParts = wtPlanParts();
+            const keys = {};
+            Object.values(wtData).forEach(e => { if (e && e.part) keys[e.part] = true; });
+            Object.keys(planParts).forEach(p => keys[p] = true);
+            const allParts = Object.keys(keys).sort();
+            const curAoa = [['料號', '品名/規格', '每小時產出(現行)', '工時秒/台(現行)', '現行生效日']];
+            const hisAoa = [['料號', '生效日', '每小時產出', '工時秒/台', '修改時間']];
+            allParts.forEach(part => {
+                const entry = wtData[wtKey(part)];
+                const cur = wtLatest(entry);
+                const pp = planParts[part] || {};
+                curAoa.push([part, (entry && entry.desc) || pp.desc || '',
+                    cur ? num(cur.rate) : (pp.rate || ''), cur ? num(cur.sec) : (pp.sec || ''), cur ? (cur.from || '起始') : '未設定']);
+                if (entry && entry.history) entry.history.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''))
+                    .forEach(e => hisAoa.push([part, e.from || '起始', num(e.rate), num(e.sec), e.at || '']));
+            });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(curAoa), '現行工時');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hisAoa), '工時歷程');
+            XLSX.writeFile(wb, `料號工時彙整_${todayStr().replace(/-/g, '')}.xlsx`);
+        }
+
+        // ===== 初始化 =====
+        function wtInit() {
+            try { wtData = JSON.parse(localStorage.getItem('wtData') || '{}'); } catch (e) { wtData = {}; }
+            const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
+            if (p && p.lines) {
+                p.lines = (Array.isArray(p.lines) ? p.lines : Object.values(p.lines)).filter(Boolean);
+                p.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                fzPlan = p;
+            }
+            if (db) {
+                db.ref(WT_NODE).on('value', s => {
+                    wtData = s.val() || {};
+                    localStorage.setItem('wtData', JSON.stringify(wtData));
+                    wtRender();
+                });
+                db.ref('toolbox/frozen/plan').on('value', s => {
+                    const v = s.val();
+                    if (v && v.lines) {
+                        v.lines = (Array.isArray(v.lines) ? v.lines : Object.values(v.lines)).filter(Boolean);
+                        v.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                        fzPlan = v;
+                    }
+                    wtRender();
+                });
+            }
+            wtRender();
+        }
+        wtInit();
+    </script>
+</body>
+</html>

@@ -223,14 +223,15 @@
         </div>
     </div>
 
-    <script src="common.js?v=20260706b"></script>
+    <script src="common.js?v=20260709a"></script>
     <script>
         // ===== 資料 =====
         let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
         let fzDone = {};                              // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
         let fzMeta = {};                              // toolbox/frozen/meta  {lineSan:{batchSan:{ship,short}}}
         let fzChase = {};                             // toolbox/frozen/chase {lineSan:'chase'|'adjust'} 生管指示
-        let fzNow = {};                               // toolbox/frozen/now   {lineSan:{cur,next}} 現在/下一批手動覆寫
+        let fzNow = {};                               // toolbox/frozen/now   {lineSan:{cur,next,curKey}} 現在/下一批手動覆寫
+        let fzWt = {};                                // toolbox/worktime     各料號工時（含生效日歷程），落後時數/尾數換算來源
         let fzLine = '';
 
         const FZ_ALIAS = {
@@ -392,10 +393,15 @@
                 a.tail = (a.mo > 0 ? a.mo : a.planTotal) - done;
                 a.behind = a.due - done;             // 正=落後 負=超前
                 a.pct = a.due > 0 ? done / a.due : null;
-                // 落後時間：有「每小時產出」的線＝整條線時間；有「工時(秒/台)」的＝1人工時
-                if (a.rate > 0) { a.behindHr = a.behind / a.rate; a.hrBase = '線'; }
-                else if (a.sec > 0) { a.behindHr = a.behind * a.sec / 3600; a.hrBase = '1人'; }
-                else { a.behindHr = null; a.hrBase = ''; }
+                // 工時來源：料號工時彙整（依批次排程日抓「生效」工時）；工時表沒有的料號才退回 Frozen 表內建
+                let eRate = a.rate, eSec = a.sec;
+                const wtE = wtEffective(fzWt[wtKey(a.part)], a.first || baseDs);
+                if (wtE && (num(wtE.rate) > 0 || num(wtE.sec) > 0)) { eRate = num(wtE.rate); eSec = num(wtE.sec); }
+                a.wtRate = eRate; a.wtSec = eSec; a.wtFrom = wtE ? (wtE.from || '') : ''; a.wtSet = !!wtE;
+                // 落後/尾數時間：有「每小時產出」＝整條線時間；有「工時(秒/台)」＝1人工時
+                if (eRate > 0) { a.behindHr = a.behind / eRate; a.tailHr = a.tail / eRate; a.hrBase = '線'; }
+                else if (eSec > 0) { a.behindHr = a.behind * eSec / 3600; a.tailHr = a.tail * eSec / 3600; a.hrBase = '1人'; }
+                else { a.behindHr = null; a.tailHr = null; a.hrBase = ''; }
                 return a;
             }).sort((x, y) => (x.first || '9999') < (y.first || '9999') ? -1 : 1);
         }
@@ -445,12 +451,17 @@
             const active = list.filter(a => a.tail > 0.01);
             if (!active.length) return null;
             let cur;
-            const spanning = active.filter(a => a.first && a.last && a.first <= today && a.last >= today);
-            if (spanning.length) {
-                cur = spanning[spanning.length - 1];        // 多批排程重疊今天 → 取最晚開始（進度最前）
-            } else {
-                const started = active.filter(a => a.first && a.first <= today);
-                cur = started.length ? started[started.length - 1] : active[0];   // 都在未來→尚未開線
+            // 手動勾選：看板下方選了「現在做哪一批」→ 以勾選的為準（該批仍未完才生效）
+            const ov = fzNow[san(line.name)] || {};
+            if (ov.curKey) cur = active.find(a => (a.batch + '|' + a.part) === ov.curKey);
+            if (!cur) {
+                const spanning = active.filter(a => a.first && a.last && a.first <= today && a.last >= today);
+                if (spanning.length) {
+                    cur = spanning[spanning.length - 1];        // 多批排程重疊今天 → 取最晚開始（進度最前）
+                } else {
+                    const started = active.filter(a => a.first && a.first <= today);
+                    cur = started.length ? started[started.length - 1] : active[0];   // 都在未來→尚未開線
+                }
             }
             const rec = (fzDone[san(line.name)] || {})[san(cur.batch + '|' + cur.part)] || {};
             const curLast = Object.keys(rec).filter(d => num(rec[d]) > 0).sort().pop() || '';
@@ -460,11 +471,12 @@
         function fzNowText(now) {
             if (!now) return { cur: '✅ 無未完批次', next: '無' };
             const c = now.cur, today = todayStr();
+            const tailHrTxt = c.tailHr != null ? `≈${Math.round(c.tailHr * 10) / 10} 小時（${c.hrBase}）` : '';
             // 首批排程日還沒到 → 這條線還沒開線
             if (c.first && c.first > today) {
-                return { cur: `尚未開線（${c.first.slice(5)} 開線）`, next: `${c.batch}（排程 ${c.first.slice(5)} 起，尾數 ${Math.round(c.tail)}）` };
+                return { cur: `尚未開線（${c.first.slice(5)} 開線）`, next: `${c.batch}（排程 ${c.first.slice(5)} 起，尾數 ${Math.round(c.tail)}${tailHrTxt ? '＝' + tailHrTxt : ''}）` };
             }
-            const cur = `${c.batch}（尾數 ${Math.round(c.tail)}${now.curLast ? '，最近回報 ' + now.curLast.slice(5) : '，尚未回報'}）`;
+            const cur = `${c.batch}（尾數 ${Math.round(c.tail)}${tailHrTxt ? '＝' + tailHrTxt : ''}${now.curLast ? '，最近回報 ' + now.curLast.slice(5) : '，尚未回報'}）`;
             const next = now.next ? `${now.next.batch}（排程 ${now.next.first ? now.next.first.slice(5) : '—'} 起）` : '無';
             return { cur, next };
         }
@@ -477,6 +489,16 @@
                 curAuto: auto.cur, nextAuto: auto.next,
                 curEdited: !!ov.cur, nextEdited: !!ov.next
             };
+        }
+        // 勾選「現在做哪一批」：存 curKey（清掉舊的文字覆寫），全員同步；空＝回到自動判斷
+        function fzPickCur(lk, key) {
+            fzNow[lk] = fzNow[lk] || {};
+            if (key) fzNow[lk].curKey = key; else delete fzNow[lk].curKey;
+            delete fzNow[lk].cur;
+            if (!Object.keys(fzNow[lk]).length) delete fzNow[lk];
+            localStorage.setItem('fzNow', JSON.stringify(fzNow));
+            if (db) db.ref('toolbox/frozen/now/' + lk).set(fzNow[lk] || null);
+            fzBoard();
         }
         function fzSetNow(lk, f, val) {
             val = String(val || '').trim();
@@ -560,13 +582,19 @@
                         <button class="flag-btn adjust ${st === 'adjust' ? 'on' : ''}" onclick="fzToggleChase('${lkq}', 'adjust')">🛠 可落後</button>
                     </span>`;
                 }).join('');
-            // 現在／下一批 手動微調區（看板外）：留空＝自動判斷
+            // 現在／下一批 手動微調區（看板外）：現在＝下拉勾選批次（留「自動判斷」＝系統判斷）、下一批＝自由文字
             document.getElementById('fzNowEdit').innerHTML = fzPlan.lines.map(line => {
                 const lk = san(line.name), lkq = lk.replace(/'/g, "\\'");
                 const nd = fzNowDisplay(line, day), ov = fzNow[lk] || {};
+                const active = fzAggregate(line, todayStr()).filter(a => a.tail > 0.01);
+                const opts = ['<option value="">自動判斷</option>'].concat(active.map(a => {
+                    const k = a.batch + '|' + a.part;
+                    const lag = a.behind > 0.01 ? '，落後 ' + Math.round(a.behind) : '';
+                    return `<option value="${esc(k)}"${ov.curKey === k ? ' selected' : ''}>${esc(a.batch)}（尾數 ${Math.round(a.tail)}${lag}）</option>`;
+                })).join('');
                 return `<div class="ne-row">
                     <b>${esc(line.name)}</b>
-                    <label>現在<input class="ne-in ${ov.cur ? 'filled' : ''}" data-lk="${esc(lk)}" data-f="cur" value="${esc(ov.cur || '')}" placeholder="自動：${esc(nd.curAuto)}"></label>
+                    <label>現在做哪一批 <select class="ne-sel" data-lk="${esc(lk)}" onchange="fzPickCur('${lkq}', this.value)" style="flex:1;min-width:210px;padding:5px 8px;border:1px solid #ccc;border-radius:6px;font-size:12.5px;${ov.curKey ? 'border-color:#a06e44;background:#f6efe6;' : ''}">${opts}</select></label>
                     <label>下一批<input class="ne-in ${ov.next ? 'filled' : ''}" data-lk="${esc(lk)}" data-f="next" value="${esc(ov.next || '')}" placeholder="自動：${esc(nd.nextAuto)}"></label>
                 </div>`;
             }).join('');
@@ -632,10 +660,13 @@
             const due = has(m.due) ? num(m.due) : a.due;
             const done = has(m.done) ? num(m.done) : a.done;
             const behind = has(m.behind) ? num(m.behind) : (due - done);
+            // 工時採用彙總算好的生效工時（料號工時彙整，退回 Frozen 表內建）
+            const eRate = a.wtRate != null ? a.wtRate : a.rate;
+            const eSec = a.wtSec != null ? a.wtSec : a.sec;
             let behindHr, hrBase;
             if (has(m.behindHr)) { behindHr = num(m.behindHr); hrBase = a.hrBase || '—'; }
-            else if (a.rate > 0) { behindHr = behind / a.rate; hrBase = '線'; }
-            else if (a.sec > 0) { behindHr = behind * a.sec / 3600; hrBase = '1人'; }
+            else if (eRate > 0) { behindHr = behind / eRate; hrBase = '線'; }
+            else if (eSec > 0) { behindHr = behind * eSec / 3600; hrBase = '1人'; }
             else { behindHr = null; hrBase = ''; }
             return {
                 batch: has(m.batch) ? m.batch : a.batch,
@@ -868,6 +899,8 @@
             if (ch) fzChase = ch;
             const nw = JSON.parse(localStorage.getItem('fzNow') || 'null');
             if (nw) fzNow = nw;
+            const wt = JSON.parse(localStorage.getItem('wtData') || 'null');
+            if (wt) fzWt = wt;
             // 還原看板期間勾選
             const sh = JSON.parse(localStorage.getItem('fzShow') || 'null');
             if (sh) {
@@ -913,6 +946,11 @@
                 db.ref('toolbox/frozen/now').on('value', s => {
                     const v = s.val() || {};
                     fzNow = v; localStorage.setItem('fzNow', JSON.stringify(v)); fzBoard();
+                });
+                db.ref(WT_NODE).on('value', s => {
+                    fzWt = s.val() || {};
+                    localStorage.setItem('wtData', JSON.stringify(fzWt));
+                    fzBoard(); fzRender();
                 });
             }
             fzRenderAll();

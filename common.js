@@ -50,6 +50,33 @@ function num(v) {
     return isNaN(n) ? 0 : n;
 }
 
+// ===== 工時彙整（各料號工時，含生效日歷程）=====
+// 雲端節點 toolbox/worktime = { <料號san>: { part, desc, history:[{from, rate, sec, at}] } }
+//   rate=每小時產出（智能線用）、sec=工時秒/台（其他線用）、from=生效日、at=修改時間
+const WT_NODE = 'toolbox/worktime';
+// Firebase key 不可含 . # $ / [ ]，料號一律 sanitize
+function wtKey(part) { return String(part ?? '').replace(/[.#$/\[\]]/g, '_'); }
+// 取某料號在指定日期「生效」的工時：history 中 from ≤ date 的最後一筆；都比 date 晚則用最早一筆
+function wtEffective(entry, date) {
+    if (!entry || !Array.isArray(entry.history) || !entry.history.length) return null;
+    const h = entry.history.slice().sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+    let pick = h[0];
+    for (const e of h) { if ((e.from || '') <= (date || '')) pick = e; else break; }
+    return pick;
+}
+// 取某料號目前最新（生效日最大）的工時
+function wtLatest(entry) {
+    if (!entry || !Array.isArray(entry.history) || !entry.history.length) return null;
+    return entry.history.slice().sort((a, b) => (a.from || '').localeCompare(b.from || '')).pop();
+}
+// 依工時把「台數」換算成小時：有每小時產出→台/rate（整線時間，base=線）；有工時秒→台×秒/3600（1人工時，base=1人）
+function wtQtyToHr(wt, qty) {
+    if (!wt) return { hr: null, base: '' };
+    if (num(wt.rate) > 0) return { hr: qty / num(wt.rate), base: '線' };
+    if (num(wt.sec) > 0) return { hr: qty * num(wt.sec) / 3600, base: '1人' };
+    return { hr: null, base: '' };
+}
+
 // 日期解析：容忍 Excel 日期物件、序號、2026/7/2、2026-07-02 等格式
 function parseDateCell(v) {
     if (v == null || v === '') return '';

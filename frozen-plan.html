@@ -186,10 +186,11 @@
         </div>
     </div>
 
-    <script src="common.js?v=20260706b"></script>
+    <script src="common.js?v=20260709a"></script>
     <script>
         // ===== 資料：與 Frozen 進度追蹤共用 toolbox/frozen/plan =====
         let fzPlan = { updatedAt: '', lines: [] };
+        let fzWt = {};                    // toolbox/worktime：各料號工時（含生效日歷程），顯示預計工時用
         let fzLine = '';
 
         // 產線頁籤＋表格總渲染
@@ -425,7 +426,9 @@
             faBatchList.forEach((b, i) => bIdx[b.key] = i);
             const disp = line.rows.map((r, i) => ({ r, i })).sort((a, b) => (a.r.date || '').localeCompare(b.r.date || ''));
             const today = todayStr();
-            let html = '<tr><th>批次</th><th>工單</th><th>零件編號</th><th>規格</th><th style="text-align:right;">MO量</th><th style="text-align:right;">排程量</th><th>備註</th><th>操作</th></tr>';
+            // 依料號工時彙整、按該列排程日抓生效工時，把排程量換算成預計工時
+            const rowHr = rr => wtQtyToHr(wtEffective(fzWt[wtKey(rr.part)], rr.date), rr.plan || 0);
+            let html = '<tr><th>批次</th><th>工單</th><th>零件編號</th><th>規格</th><th style="text-align:right;">MO量</th><th style="text-align:right;">排程量</th><th style="text-align:right;">預計工時</th><th>備註</th><th>操作</th></tr>';
             let curDate = null;
             const seenBatch = {};
             disp.forEach(({ r, i }) => {
@@ -433,16 +436,20 @@
                     curDate = r.date;
                     const dayRows = disp.filter(x => x.r.date === curDate);
                     const daySum = dayRows.reduce((s, x) => s + (x.r.plan || 0), 0);
+                    let dayHr = 0, hasHr = false;
+                    dayRows.forEach(x => { const q = rowHr(x.r); if (q.hr != null) { dayHr += q.hr; hasHr = true; } });
                     const wd = faWeekday(curDate);
                     const cls = curDate === today ? 'fa-today' : ((wd === '六' || wd === '日') ? 'fa-wknd' : '');
-                    html += `<tr class="fa-date ${cls}"><td colspan="8">📆 ${esc(curDate.slice(5).replace('-', '/'))}（週${wd}）${curDate === today ? '・今天' : ''}　<span style="font-weight:normal;">${dayRows.length} 筆・合計 ${Math.round(daySum)} pcs</span></td></tr>`;
+                    html += `<tr class="fa-date ${cls}"><td colspan="9">📆 ${esc(curDate.slice(5).replace('-', '/'))}（週${wd}）${curDate === today ? '・今天' : ''}　<span style="font-weight:normal;">${dayRows.length} 筆・合計 ${Math.round(daySum)} pcs${hasHr ? '・約 ' + (Math.round(dayHr * 10) / 10) + ' 工時' : ''}</span></td></tr>`;
                 }
                 const k = faKey(r);
                 const jumpBtn = seenBatch[k] ? '' : `<button class="fa-mini" style="background:#a5820b;" title="這批插到別天，其他批順延" onclick="faOpenJump(${bIdx[k]})">🔀</button>`;
                 seenBatch[k] = true;
+                const q = rowHr(r);
+                const hrCell = q.hr != null ? `${Math.round(q.hr * 10) / 10}<span style="font-size:11px;color:#999;">(${q.base})</span>` : '<span style="color:#c0392b;" title="料號工時彙整沒這個料號的工時">—</span>';
                 html += `<tr class="${(r.date || '') < today ? 'fa-past' : ''}">` +
                     `<td><b>${esc(r.batch)}</b></td><td>${esc(r.wo || '')}</td><td>${esc(r.part)}</td><td style="color:#888;">${esc(r.desc || '')}</td>` +
-                    `<td style="text-align:right;">${r.mo || ''}</td><td style="text-align:right;"><b>${Math.round(r.plan)}</b></td><td>${esc(r.note || '')}</td>` +
+                    `<td style="text-align:right;">${r.mo || ''}</td><td style="text-align:right;"><b>${Math.round(r.plan)}</b></td><td style="text-align:right;">${hrCell}</td><td>${esc(r.note || '')}</td>` +
                     `<td>${jumpBtn}<button class="fa-mini" style="background:#7a8663;" onclick="faOpenRow(${i})">✏️</button><button class="fa-mini" style="background:#c0392b;" onclick="faDeleteRow(${i})">🗑</button></td></tr>`;
             });
             document.getElementById('faTable').innerHTML = html;
@@ -456,8 +463,14 @@
                 p.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
                 fzPlan = p;
             }
+            try { fzWt = JSON.parse(localStorage.getItem('wtData') || '{}'); } catch (e) { fzWt = {}; }
             if (fzPlan.lines.length && !fzLine) fzLine = fzPlan.lines[0].name;
             if (db) {
+                db.ref(WT_NODE).on('value', s => {
+                    fzWt = s.val() || {};
+                    localStorage.setItem('wtData', JSON.stringify(fzWt));
+                    fzRenderAll();
+                });
                 db.ref('toolbox/frozen/plan').on('value', s => {
                     const v = s.val();
                     if (v && v.lines) {
