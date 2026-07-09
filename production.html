@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>車種產量統計</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; padding: 20px; text-align: center; position: relative; }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: white; text-decoration: none; font-size: 14px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #eee; align-items: center; font-size: 14px; }
+        .toolbar label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .toolbar input[type=date] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .quick { border: 1px solid #ccc; background: white; padding: 7px 14px; border-radius: 16px; font-size: 13.5px; cursor: pointer; color: #555; }
+        .quick.active { background: #7a8663; border-color: #7a8663; color: white; }
+        .seg { display: inline-flex; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; }
+        .seg button { border: none; background: white; padding: 7px 14px; font-size: 13.5px; cursor: pointer; color: #555; }
+        .seg button.active { background: #bd8a63; color: white; }
+        .imp-btn { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .export-btn { border: 1px solid #ccc; background: white; padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+        .sumbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 20px 0; }
+        .chip { padding: 7px 16px; border-radius: 18px; font-size: 14px; color: white; background: #6c757d; }
+        .chip.green { background: #28a745; }
+        .chip.olive { background: #7a8663; }
+        .panel { padding: 12px 20px 30px; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 70vh; overflow-y: auto; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
+        table.data th { background: #f5f6fa; padding: 9px 8px; text-align: left; color: #555; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+        table.data td { padding: 8px; border-bottom: 1px solid #f0f0f0; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        tr.model-row { cursor: pointer; }
+        tr.model-row:hover td { background: #f9f7f0; }
+        tr.model-row td:first-child { font-weight: bold; color: #55503f; }
+        tr.detail td { background: #faf7ef; font-size: 12.5px; color: #6e5a3a; padding: 0; }
+        .detail-inner { padding: 8px 12px; }
+        .detail-inner table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .detail-inner th { background: #efe9dc; padding: 5px 7px; text-align: left; color: #6e5a3a; }
+        .detail-inner td { padding: 4px 7px; border-bottom: 1px solid #ece3cf; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; line-height: 1.9; }
+        .note { font-size: 12px; color: #999; padding: 10px 20px 24px; line-height: 1.7; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>🚲 車種產量統計</h1>
+            <p>選日期區段，看各車種的產量（當天／當月／年度），可展開明細、匯出 Excel</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="quick" id="qDay" onclick="pdQuick('day')">當天</button>
+            <button class="quick" id="qMonth" onclick="pdQuick('month')">當月</button>
+            <button class="quick" id="qYear" onclick="pdQuick('year')">年度</button>
+            <label>從 <input type="date" id="pdFrom" onchange="pdRender()"></label>
+            <label>到 <input type="date" id="pdTo" onchange="pdRender()"></label>
+            <span class="seg">
+                <button id="srcPlan" class="active" onclick="pdSetSrc('plan')">排程量</button>
+                <button id="srcDone" onclick="pdSetSrc('done')">完成量</button>
+            </span>
+            <button class="export-btn" onclick="pdExport()">⬇️ 匯出</button>
+        </div>
+
+        <div class="sumbar" id="pdSum"></div>
+
+        <div class="panel">
+            <div class="table-wrap">
+                <table class="data" id="pdTable"></table>
+            </div>
+        </div>
+        <div class="note">
+            說明：<b>車種</b>由批次名自動歸類（SC3.22 No.108＋No.121 都算 SC3.22；批次含「重工」歸「重工」）。<b>同一批每天只算一次</b>——智能-3／精密機電同批的「半品完成／烤箱前／膠乾前」等多道工序、跨產線同批不會重複加總（取該批當天最大量）。點任一車種可<b>展開明細</b>，看它包含哪些日期／產線／批次／料號（主管詢問時可交代）。數量可切換<b>排程量</b>（計畫）或<b>完成量</b>（每天實際回報）。
+        </div>
+    </div>
+
+    <script src="common.js?v=20260709a"></script>
+    <script>
+        let fzPlan = { updatedAt: '', lines: [] };
+        let fzDone = {};
+        let pdSrc = 'plan';
+        const pdOpen = {};   // 展開的車種
+        const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
+
+        // 工序尾巴：同一批的不同製程階段
+        const PD_STAGE = /[-\s]*(半品完成|成品完成|半成品|烤箱前|烤箱後|膠乾前|膠乾後|組裝|組立|完成)[\s\S]*$/;
+        // 去工序尾巴（保留 No.xx），供「每批每天只算一次」的去重鍵
+        function baseBatch(b) {
+            const raw = String(b || '').trim();
+            const s = raw.replace(PD_STAGE, '').trim();
+            return s || raw;
+        }
+        // 車種：重工→重工；否則去工序、去 No.xx 尾巴取前綴
+        function modelOf(batch) {
+            const raw = String(batch || '').trim();
+            if (/重工/.test(raw)) return '重工';
+            let b = baseBatch(raw);
+            b = b.replace(/\s*N[oO]\.?\s*\d+[\s\S]*$/, '').trim();   // 去 No.xx 之後
+            b = b.replace(/[-\s]+$/, '').trim();
+            return b || raw;
+        }
+
+        // 蒐集期間內的生產事件：{date,line,batch,part,desc,qty}
+        function pdEvents(from, to) {
+            const ev = [];
+            if (pdSrc === 'plan') {
+                fzPlan.lines.forEach(l => (l.rows || []).forEach(r => {
+                    if (r.date && r.date >= from && r.date <= to && num(r.plan) > 0)
+                        ev.push({ date: r.date, line: l.name, batch: r.batch, part: r.part, desc: r.desc || '', qty: num(r.plan) });
+                }));
+            } else {
+                // 完成量：done 的 batchSan 反查 plan 還原批次/料號
+                const bmap = {};
+                fzPlan.lines.forEach(l => (l.rows || []).forEach(r => { bmap[san(r.batch + '|' + r.part)] = { batch: r.batch, part: r.part, desc: r.desc || '' }; }));
+                Object.entries(fzDone).forEach(([line, batches]) => {
+                    Object.entries(batches || {}).forEach(([bk, rec]) => {
+                        let info = bmap[bk];
+                        if (!info) { const i = bk.lastIndexOf('|'); info = { batch: i >= 0 ? bk.slice(0, i) : bk, part: i >= 0 ? bk.slice(i + 1) : '', desc: '' }; }
+                        Object.entries(rec || {}).forEach(([d, q]) => {
+                            if (d >= from && d <= to && num(q) > 0)
+                                ev.push({ date: d, line, batch: info.batch, part: info.part, desc: info.desc, qty: num(q) });
+                        });
+                    });
+                });
+            }
+            return ev;
+        }
+
+        // 每批每天只算一次：以 (日期, 去工序批次, 料號) 去重，取最大量；保留來源工序/產線供明細
+        function pdDedup(events) {
+            const m = {};
+            events.forEach(e => {
+                const bb = baseBatch(e.batch);
+                const k = e.date + '||' + bb + '||' + e.part;
+                if (!m[k]) m[k] = { date: e.date, baseBatch: bb, part: e.part, desc: e.desc, model: modelOf(e.batch), qty: 0, srcs: [] };
+                if (e.qty > m[k].qty) m[k].qty = e.qty;
+                if (!m[k].desc && e.desc) m[k].desc = e.desc;
+                m[k].srcs.push({ line: e.line, batch: e.batch, qty: e.qty });
+            });
+            return Object.values(m);
+        }
+
+        function pdGroup(deduped) {
+            const g = {};
+            deduped.forEach(d => {
+                const key = d.model.toLowerCase().replace(/\s+/g, ' ').trim();   // 大小寫/空白差異視為同車種
+                const m = g[key] = g[key] || { model: d.model, qty: 0, items: [] };
+                m.qty += d.qty; m.items.push(d);
+            });
+            Object.values(g).forEach(m => m.items.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.baseBatch.localeCompare(b.baseBatch)));
+            return Object.values(g).sort((a, b) => b.qty - a.qty);
+        }
+
+        function pdData() {
+            const from = document.getElementById('pdFrom').value, to = document.getElementById('pdTo').value;
+            if (!from || !to || from > to) return { from, to, groups: [], total: 0, batchN: 0 };
+            const deduped = pdDedup(pdEvents(from, to));
+            const groups = pdGroup(deduped);
+            return { from, to, groups, total: groups.reduce((s, g) => s + g.qty, 0), batchN: deduped.length };
+        }
+
+        function pdRender() {
+            const { from, to, groups, total, batchN } = pdData();
+            const srcLabel = pdSrc === 'plan' ? '排程量' : '完成量';
+            document.getElementById('pdSum').innerHTML =
+                `<span class="chip olive">${esc(from || '—')} ～ ${esc(to || '—')}</span>` +
+                `<span class="chip">來源：${srcLabel}</span>` +
+                `<span class="chip green">${groups.length} 個車種</span>` +
+                `<span class="chip green">總量 ${Math.round(total)} 台（${batchN} 批）</span>`;
+            const table = document.getElementById('pdTable');
+            const head = `<tr><th>車種</th><th class="num">批數</th><th class="num">總量（${srcLabel}）</th><th></th></tr>`;
+            if (!groups.length) {
+                table.innerHTML = head + `<tr><td colspan="4"><div class="empty-hint">${from && to ? '這個區段沒有資料' : '請選日期區段'}${pdSrc === 'done' ? '<br>（完成量＝每天實際回報的量，沒回報的日子為 0）' : ''}</div></td></tr>`;
+                return;
+            }
+            let html = head;
+            groups.forEach(g => {
+                const open = pdOpen[g.model];
+                html += `<tr class="model-row" onclick="pdToggle('${esc(g.model).replace(/'/g, "\\'")}')">
+                    <td>${open ? '▼' : '▶'} ${esc(g.model)}</td>
+                    <td class="num">${g.items.length}</td>
+                    <td class="num"><b>${Math.round(g.qty)}</b></td>
+                    <td class="num" style="color:#7a8663;font-size:12px;">明細</td></tr>`;
+                if (open) {
+                    let d = '<div class="detail-inner"><table><tr><th>日期</th><th>批次</th><th>料號</th><th>品名/規格</th><th class="num">量</th><th>產線／工序</th></tr>';
+                    g.items.forEach(it => {
+                        const srcTxt = [...new Set(it.srcs.map(s => s.line + (s.batch !== it.baseBatch ? '：' + s.batch.replace(it.baseBatch, '').replace(/^[-\s]+/, '') : '')))].join('、');
+                        d += `<tr><td>${esc(it.date)}</td><td>${esc(it.baseBatch)}</td><td>${esc(it.part)}</td><td style="color:#999;">${esc(it.desc)}</td><td class="num">${Math.round(it.qty)}</td><td style="color:#999;">${esc(srcTxt)}</td></tr>`;
+                    });
+                    d += '</table></div>';
+                    html += `<tr class="detail"><td colspan="4">${d}</td></tr>`;
+                }
+            });
+            table.innerHTML = html;
+        }
+
+        function pdToggle(model) { pdOpen[model] = !pdOpen[model]; pdRender(); }
+        function pdSetSrc(s) {
+            pdSrc = s;
+            document.getElementById('srcPlan').classList.toggle('active', s === 'plan');
+            document.getElementById('srcDone').classList.toggle('active', s === 'done');
+            pdRender();
+        }
+
+        // 快速區段（以今天為準）
+        function pdQuick(kind) {
+            const t = new Date(), y = t.getFullYear(), m = String(t.getMonth() + 1).padStart(2, '0');
+            let from, to;
+            if (kind === 'day') { from = to = todayStr(); }
+            else if (kind === 'month') { from = `${y}-${m}-01`; to = `${y}-${m}-31`; }
+            else { from = `${y}-01-01`; to = `${y}-12-31`; }
+            document.getElementById('pdFrom').value = from;
+            document.getElementById('pdTo').value = to;
+            ['qDay', 'qMonth', 'qYear'].forEach(id => document.getElementById(id).classList.remove('active'));
+            document.getElementById({ day: 'qDay', month: 'qMonth', year: 'qYear' }[kind]).classList.add('active');
+            pdRender();
+        }
+
+        function pdExport() {
+            const { from, to, groups, total } = pdData();
+            if (!groups.length) { alert('這個區段沒有資料'); return; }
+            const srcLabel = pdSrc === 'plan' ? '排程量' : '完成量';
+            const sumAoa = [[`車種產量彙總（${from}～${to}・${srcLabel}）`], ['車種', '批數', '總量']];
+            const detAoa = [['車種', '日期', '批次', '料號', '品名/規格', '量', '產線／工序']];
+            groups.forEach(g => {
+                sumAoa.push([g.model, g.items.length, Math.round(g.qty)]);
+                g.items.forEach(it => {
+                    const srcTxt = [...new Set(it.srcs.map(s => s.line + (s.batch !== it.baseBatch ? '：' + s.batch.replace(it.baseBatch, '').replace(/^[-\s]+/, '') : '')))].join('、');
+                    detAoa.push([g.model, it.date, it.baseBatch, it.part, it.desc, Math.round(it.qty), srcTxt]);
+                });
+            });
+            sumAoa.push(['總計', '', Math.round(total)]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '車種彙總');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detAoa), '明細');
+            XLSX.writeFile(wb, `車種產量_${srcLabel}_${from.replace(/-/g, '')}-${to.replace(/-/g, '')}.xlsx`);
+        }
+
+        // ===== 初始化 =====
+        function pdInit() {
+            const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
+            if (p && p.lines) {
+                p.lines = (Array.isArray(p.lines) ? p.lines : Object.values(p.lines)).filter(Boolean);
+                p.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                fzPlan = p;
+            }
+            try { fzDone = JSON.parse(localStorage.getItem('fzDone') || '{}'); } catch (e) { fzDone = {}; }
+            pdQuick('month');   // 預設看當月
+            if (db) {
+                db.ref('toolbox/frozen/plan').on('value', s => {
+                    const v = s.val();
+                    if (v && v.lines) {
+                        v.lines = (Array.isArray(v.lines) ? v.lines : Object.values(v.lines)).filter(Boolean);
+                        v.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                        fzPlan = v; localStorage.setItem('fzPlan', JSON.stringify(v));
+                    }
+                    pdRender();
+                });
+                db.ref('toolbox/frozen/done').on('value', s => {
+                    fzDone = s.val() || {}; localStorage.setItem('fzDone', JSON.stringify(fzDone)); pdRender();
+                });
+            }
+            pdRender();
+        }
+        pdInit();
+    </script>
+</body>
+</html>
