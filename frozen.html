@@ -532,27 +532,31 @@
         }
         // 落後警訊門檻：整線落後 ≥ 8 小時、或 1 人工時落後 ≥ 24 小時
         const fzWarn = (lineHr, oneHr) => lineHr >= 8 || oneHr >= 24;
-        // 產線現況：現在做哪一批（最近有回報完成量的未完批次）＋下一批預計日
-        function fzLineNow(line, baseDs) {
-            const list = fzAggregate(line, baseDs);
+        // 產線現況：現在做哪一批＝依排程「今天正在做的」未完批次（不是最落後那批）＋下一批預計日
+        // 尾數以今天為準；排程涵蓋今天的批次優先，沒有就取已開始(排程日≤今天)且未完、最晚開始的
+        function fzLineNow(line) {
+            const today = todayStr();
+            const list = fzAggregate(line, today);   // list 已依 first 由早到晚排序；尾數以今天為準
             const active = list.filter(a => a.tail > 0.01);
             if (!active.length) return null;
-            const doneLine = fzDone[san(line.name)] || {};
-            let cur = null, curLast = '';
-            active.forEach(a => {
-                const rec = doneLine[san(a.batch + '|' + a.part)] || {};
-                const last = Object.keys(rec).filter(d => num(rec[d]) > 0).sort().pop() || '';
-                if (last && last > curLast) { curLast = last; cur = a; }
-            });
-            if (!cur) cur = active[0];   // 都沒回報過 → 排程最早的未完批次
-            const next = active.find(a => a !== cur && (a.first || '') > (cur.first || '')) || active.find(a => a !== cur) || null;
+            let cur;
+            const spanning = active.filter(a => a.first && a.last && a.first <= today && a.last >= today);
+            if (spanning.length) {
+                cur = spanning[spanning.length - 1];        // 多批排程重疊今天 → 取最晚開始（進度最前）
+            } else {
+                const started = active.filter(a => a.first && a.first <= today);
+                cur = started.length ? started[started.length - 1] : active[0];   // 都在未來→尚未開線
+            }
+            const rec = (fzDone[san(line.name)] || {})[san(cur.batch + '|' + cur.part)] || {};
+            const curLast = Object.keys(rec).filter(d => num(rec[d]) > 0).sort().pop() || '';
+            const next = active.find(a => a !== cur && (a.first || '') > (cur.first || '')) || null;
             return { cur, curLast, next };
         }
-        function fzNowText(now, day) {
+        function fzNowText(now) {
             if (!now) return { cur: '✅ 無未完批次', next: '無' };
-            const c = now.cur;
-            // 完全沒回報過、且首批排程日還沒到 → 這條線根本還沒開線
-            if (!now.curLast && c.first && c.first > day) {
+            const c = now.cur, today = todayStr();
+            // 首批排程日還沒到 → 這條線還沒開線
+            if (c.first && c.first > today) {
                 return { cur: `尚未開線（${c.first.slice(5)} 開線）`, next: `${c.batch}（排程 ${c.first.slice(5)} 起，尾數 ${Math.round(c.tail)}）` };
             }
             const cur = `${c.batch}（尾數 ${Math.round(c.tail)}${now.curLast ? '，最近回報 ' + now.curLast.slice(5) : '，尚未回報'}）`;
@@ -561,7 +565,7 @@
         }
         // 現在/下一批顯示：有手動覆寫用覆寫，否則用自動判斷
         function fzNowDisplay(line, day) {
-            const auto = fzNowText(fzLineNow(line, day), day);
+            const auto = fzNowText(fzLineNow(line));
             const ov = fzNow[san(line.name)] || {};
             return {
                 cur: ov.cur || auto.cur, next: ov.next || auto.next,
