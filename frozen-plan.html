@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frozen 排程調整</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container {
+            max-width: 1350px; margin: 0 auto; background: white;
+            border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            color: white; padding: 20px; text-align: center; position: relative;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link {
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            color: white; text-decoration: none; font-size: 14px;
+            background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px;
+        }
+        .toolbar {
+            display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px;
+            border-bottom: 1px solid #eee; align-items: center; font-size: 14px;
+        }
+        .imp-btn {
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white;
+            border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer;
+        }
+        .export-btn {
+            border: 1px solid #ccc; background: white; padding: 8px 14px;
+            border-radius: 8px; font-size: 14px; cursor: pointer; color: #555;
+        }
+        .link-btn {
+            border: 1px solid #bd8a63; background: #fff8f0; padding: 8px 14px;
+            border-radius: 8px; font-size: 14px; cursor: pointer; color: #a06e44; text-decoration: none;
+        }
+        .toolbar label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .planstat { font-size: 12px; color: #999; padding: 8px 20px 0; }
+        .tabs { display: flex; gap: 6px; padding: 12px 20px 0; flex-wrap: wrap; }
+        .tab-btn {
+            border: 1px solid #ccc; background: white; padding: 7px 16px; border-radius: 16px;
+            font-size: 13.5px; cursor: pointer; color: #555;
+        }
+        .tab-btn.active { background: #7a8663; border-color: #7a8663; color: white; }
+        .panel { padding: 12px 20px 30px; }
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; max-height: 68vh; overflow-y: auto; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 900px; }
+        table.data th {
+            background: #f5f6fa; padding: 8px 7px; text-align: left; color: #555;
+            white-space: nowrap; position: sticky; top: 0; z-index: 1;
+        }
+        table.data td { padding: 6px 7px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; line-height: 1.9; }
+        .note { font-size: 12px; color: #999; padding: 10px 20px 24px; line-height: 1.7; }
+        /* 排程調整（順延／跳批／新增） */
+        tr.fa-date td { background: #e9edda; font-weight: bold; color: #4d5a3a; border-top: 2px solid #b9c2a3; }
+        tr.fa-date.fa-wknd td { background: #f6e7d8; color: #a05a2c; }
+        tr.fa-date.fa-today td { background: #fff3bf; color: #7a5a00; }
+        tr.fa-past td { opacity: 0.55; }
+        .fa-mini { border: none; border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer; margin-right: 3px; color: white; }
+        .fa-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; padding: 15px; }
+        .fa-modal.active { display: flex; }
+        .fa-box { background: white; border-radius: 10px; padding: 20px; width: 100%; max-width: 430px; max-height: 90vh; overflow-y: auto; }
+        .fa-box h3 { text-align: center; color: #55503f; margin-bottom: 10px; }
+        .fa-box label.fa-lb { font-size: 13px; font-weight: bold; color: #555; display: block; margin: 9px 0 4px; }
+        .fa-in { width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .fa-btns { display: flex; gap: 10px; margin-top: 16px; }
+        .fa-btns button { flex: 1; }
+        .fa-cancel { border: 1px solid #ccc; background: white; padding: 9px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📅 Frozen 排程調整</h1>
+            <p>整批順延、跳批插單、新增／編輯／刪除單筆，快速調整各產線排程順序</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="imp-btn" onclick="faOpenDelay()">⏩ 整批順延</button>
+            <button class="imp-btn" style="background:linear-gradient(135deg,#c9a227 0%,#a5820b 100%);" onclick="faOpenJump(-1)">🔀 跳批插單</button>
+            <button class="imp-btn" style="background:linear-gradient(135deg,#4aa3b8 0%,#2b8399 100%);" onclick="faOpenRow(-1)">➕ 新增排程</button>
+            <button class="export-btn" onclick="faUndo()">↩️ 復原</button>
+            <button class="export-btn" onclick="faExport()">⬇️ 匯出排程明細</button>
+            <label><input type="checkbox" id="faSkipWknd" checked> 順延跳過週六日</label>
+            <a class="link-btn" href="frozen.html">🧊 進度追蹤</a>
+        </div>
+
+        <div class="planstat" id="fzStat">載入中…</div>
+        <div class="tabs" id="fzTabs"></div>
+
+        <div class="panel">
+            <div id="faEmpty" class="empty-hint" style="display:none;">
+                目前沒有排程資料。<br>請先到 <a href="frozen.html" style="color:#a06e44;">🧊 Frozen 進度追蹤</a> 匯入 Frozen 表，再回來這裡調整。
+            </div>
+            <div id="faMain">
+                <div style="font-size:12px;color:#999;margin-bottom:8px;">
+                    調整的是「<b id="faLineName"></b>」的每日排程（用上方產線頁籤切換）；每列 🔀＝這批插到別天其他批順延、✏️＝編輯、🗑＝刪除。改完自動儲存、全員同步；已填的完成量不受影響。
+                </div>
+                <div class="table-wrap">
+                    <table class="data" id="faTable"></table>
+                </div>
+            </div>
+        </div>
+        <div class="note">
+            說明：<b>⏩ 整批順延</b>＝選起始日與天數（負數＝提前），可套用單一產線或全部產線；<b>🔀 跳批插單</b>＝把某批改到指定日開始、照原天數排，該日（含）之後其他批次自動往後順延；<b>➕ 新增排程</b>＝手動加一筆（同批次會自動帶入料號/規格/MO/產出/工時）。所有調整只動排程日排（不影響已填的完成量與尾數基準），改完全員即時同步。想回到某步之前可按 <b>↩️ 復原</b>（僅本機本次開啟有效）。
+        </div>
+    </div>
+
+    <!-- 排程調整：整批順延 -->
+    <div id="faDelayModal" class="fa-modal">
+        <div class="fa-box">
+            <h3>⏩ 整批順延</h3>
+            <label class="fa-lb">套用範圍</label>
+            <select id="faDelayScope" class="fa-in"></select>
+            <label class="fa-lb">從這天（含）開始的排程</label>
+            <input type="date" id="faDelayFrom" class="fa-in">
+            <label class="fa-lb">順延幾個工作天（填負數＝提前）</label>
+            <input type="number" id="faDelayDays" class="fa-in" value="1" step="1">
+            <div class="fa-btns">
+                <button class="imp-btn" onclick="faApplyDelay()">套用</button>
+                <button class="fa-cancel" onclick="faCloseModal('faDelayModal')">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 排程調整：跳批插單 -->
+    <div id="faJumpModal" class="fa-modal">
+        <div class="fa-box">
+            <h3>🔀 跳批插單</h3>
+            <label class="fa-lb">要插隊的批次</label>
+            <select id="faJumpBatch" class="fa-in"></select>
+            <label class="fa-lb">插到哪一天開始生產</label>
+            <input type="date" id="faJumpDate" class="fa-in">
+            <p style="font-size:12.5px;color:#888;margin-top:10px;line-height:1.6;">這批會從所選日期開始、照原本天數排；該日（含）之後的其他批次整批往後順延同樣天數。</p>
+            <div class="fa-btns">
+                <button class="imp-btn" onclick="faApplyJump()">插單</button>
+                <button class="fa-cancel" onclick="faCloseModal('faJumpModal')">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 排程調整：新增／編輯單筆 -->
+    <div id="faRowModal" class="fa-modal">
+        <div class="fa-box">
+            <h3 id="faRowTitle">➕ 新增排程</h3>
+            <div style="display:flex;gap:10px;">
+                <div style="flex:1;"><label class="fa-lb">日期 *</label><input type="date" id="faRowDate" class="fa-in"></div>
+                <div style="flex:1;"><label class="fa-lb">排程量 *</label><input type="number" id="faRowPlan" class="fa-in"></div>
+            </div>
+            <label class="fa-lb">批次 *</label>
+            <input type="text" id="faRowBatch" class="fa-in" placeholder="例如：SC3.22 No.108">
+            <label class="fa-lb">零件編號（料號）</label>
+            <input type="text" id="faRowPart" class="fa-in">
+            <label class="fa-lb">工單號碼</label>
+            <input type="text" id="faRowWo" class="fa-in">
+            <label class="fa-lb">規格敘述</label>
+            <input type="text" id="faRowDesc" class="fa-in">
+            <div style="display:flex;gap:10px;">
+                <div style="flex:1;"><label class="fa-lb">MO量</label><input type="number" id="faRowMo" class="fa-in"></div>
+                <div style="flex:1;"><label class="fa-lb">每小時產出</label><input type="number" id="faRowRate" class="fa-in" placeholder="智能線用"></div>
+                <div style="flex:1;"><label class="fa-lb">工時(秒/台)</label><input type="number" id="faRowSec" class="fa-in" placeholder="工時線用"></div>
+            </div>
+            <label class="fa-lb">備註</label>
+            <input type="text" id="faRowNote" class="fa-in">
+            <label id="faRowPushWrap" style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;margin-top:10px;cursor:pointer;"><input type="checkbox" id="faRowPush"> 新增後，同一天（含）之後的其他排程順延 1 個工作天</label>
+            <div class="fa-btns">
+                <button class="imp-btn" onclick="faSaveRow()">儲存</button>
+                <button class="fa-cancel" onclick="faCloseModal('faRowModal')">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260706b"></script>
+    <script>
+        // ===== 資料：與 Frozen 進度追蹤共用 toolbox/frozen/plan =====
+        let fzPlan = { updatedAt: '', lines: [] };
+        let fzLine = '';
+
+        // 產線頁籤＋表格總渲染
+        function fzRenderAll() {
+            const st = document.getElementById('fzStat');
+            const tabs = document.getElementById('fzTabs');
+            if (!fzPlan.lines.length) {
+                st.textContent = '尚未有排程資料';
+                tabs.innerHTML = '';
+                document.getElementById('faMain').style.display = 'none';
+                document.getElementById('faEmpty').style.display = '';
+                faBatchList = [];
+                return;
+            }
+            document.getElementById('faEmpty').style.display = 'none';
+            document.getElementById('faMain').style.display = '';
+            if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines[0].name;
+            st.textContent = `Frozen 排程：${fzPlan.lines.map(l => `${l.name} ${l.rows.length} 筆`).join('・')}（更新於 ${fzPlan.updatedAt}）`;
+            tabs.innerHTML = fzPlan.lines.map(l =>
+                `<button class="tab-btn ${l.name === fzLine ? 'active' : ''}" onclick="fzPick('${l.name.replace(/'/g, "\\'")}')">${esc(l.name)}</button>`).join('');
+            faRender();
+        }
+        function fzPick(n) { fzLine = n; fzRenderAll(); }
+
+        // ===== 排程調整（動的是 fzPlan 的日排程，完成量不受影響）=====
+        let faUndoStack = [];      // 最近 10 步復原（只在本機本次開啟有效）
+        let faBatchList = [];      // 目前產線的批次清單（跳批選單／表格按鈕共用）
+        let faEditIdx = -1;        // 編輯中的列索引；-1＝新增
+
+        const faSkip = () => document.getElementById('faSkipWknd').checked;
+        const faKey = r => (r.batch || '') + '|' + (r.part || '');   // 與進度追蹤同一把批次鑰匙
+        const faLine = () => fzPlan.lines.find(l => l.name === fzLine) || null;
+        const faWeekday = ds => ['日', '一', '二', '三', '四', '五', '六'][new Date(ds + 'T00:00:00').getDay()];
+        function faSortRows(line) { line.rows.sort((a, b) => (a.date || '').localeCompare(b.date || '')); }
+
+        // 往後（或往前）算 n 個工作天；skip＝跳過週六日
+        function faAddWorkdays(ds, n, skip) {
+            if (!ds || !n) return ds;
+            const d = new Date(ds + 'T00:00:00');
+            if (isNaN(d)) return ds;
+            const step = n > 0 ? 1 : -1;
+            let left = Math.abs(n);
+            while (left > 0) {
+                d.setDate(d.getDate() + step);
+                if (skip && (d.getDay() === 0 || d.getDay() === 6)) continue;
+                left--;
+            }
+            return fmtDate(d);
+        }
+
+        function faSnapshot() {
+            faUndoStack.push(JSON.stringify(fzPlan));
+            if (faUndoStack.length > 10) faUndoStack.shift();
+        }
+        function faUndo() {
+            if (!faUndoStack.length) { alert('沒有可復原的調整（復原只在這台裝置、這次開啟期間有效）'); return; }
+            fzPlan = JSON.parse(faUndoStack.pop());
+            faSave('');
+        }
+        function faSave(tag) {
+            fzPlan.updatedAt = new Date().toLocaleString('zh-TW') + (tag || '');
+            localStorage.setItem('fzPlan', JSON.stringify(fzPlan));
+            if (db) db.ref('toolbox/frozen/plan').set(fzPlan).catch(e => console.log('雲端儲存失敗', e));
+            fzRenderAll();
+        }
+        function faCloseModal(id) { document.getElementById(id).classList.remove('active'); }
+
+        // ---- 整批順延 ----
+        function faOpenDelay() {
+            if (!faLine()) { alert('目前沒有排程，請先到 Frozen 進度追蹤匯入'); return; }
+            document.getElementById('faDelayScope').innerHTML =
+                `<option value="cur">目前產線（${esc(fzLine)}）</option><option value="all">所有產線</option>`;
+            document.getElementById('faDelayFrom').value = todayStr();
+            document.getElementById('faDelayDays').value = 1;
+            document.getElementById('faDelayModal').classList.add('active');
+        }
+        function faApplyDelay() {
+            const scope = document.getElementById('faDelayScope').value;
+            const from = document.getElementById('faDelayFrom').value;
+            const days = Math.trunc(Number(document.getElementById('faDelayDays').value));
+            if (!from) { alert('請選擇起始日期'); return; }
+            if (!days) { alert('請填順延天數（負數＝提前）'); return; }
+            const targets = scope === 'all' ? fzPlan.lines : [faLine()].filter(Boolean);
+            const skip = faSkip();
+            let count = 0;
+            targets.forEach(l => l.rows.forEach(r => { if ((r.date || '') >= from) count++; }));
+            if (!count) { alert(`${from}（含）之後沒有排程`); return; }
+            if (!confirm(`${scope === 'all' ? '所有產線' : fzLine} 從 ${from} 起共 ${count} 筆排程，將${days > 0 ? '順延' : '提前'} ${Math.abs(days)} 個工作天${skip ? '（跳過週六日）' : ''}，確定？`)) return;
+            faSnapshot();
+            targets.forEach(l => {
+                l.rows.forEach(r => { if ((r.date || '') >= from) r.date = faAddWorkdays(r.date, days, skip); });
+                faSortRows(l);
+            });
+            faCloseModal('faDelayModal');
+            faSave('（整批順延）');
+        }
+
+        // ---- 跳批插單：被選批次改從目標日起、照原本天數排；目標日(含)之後其他排程往後推同樣天數 ----
+        function faOpenJump(preIdx) {
+            const line = faLine();
+            if (!line || !line.rows.length) { alert('目前沒有排程，請先到 Frozen 進度追蹤匯入'); return; }
+            document.getElementById('faJumpBatch').innerHTML = faBatchList.map((b, i) =>
+                `<option value="${i}"${i === preIdx ? ' selected' : ''}>${esc(b.batch)}｜${esc(b.part)}（${b.first.slice(5)} 起・${b.days} 天）</option>`).join('');
+            document.getElementById('faJumpDate').value = todayStr();
+            document.getElementById('faJumpModal').classList.add('active');
+        }
+        function faApplyJump() {
+            const line = faLine();
+            const b = faBatchList[Number(document.getElementById('faJumpBatch').value)];
+            const target = document.getElementById('faJumpDate').value;
+            if (!line || !b) { alert('請選擇批次'); return; }
+            if (!target) { alert('請選擇插入日期'); return; }
+            const skip = faSkip();
+            const bDates = [...new Set(line.rows.filter(r => faKey(r) === b.key).map(r => r.date))].sort();
+            const map = {};
+            let cur = target;
+            bDates.forEach((d, i) => { if (i > 0) cur = faAddWorkdays(cur, 1, skip); map[d] = cur; });
+            let pushed = 0;
+            line.rows.forEach(r => { if (faKey(r) !== b.key && (r.date || '') >= target) pushed++; });
+            if (!confirm(`批次「${b.batch}」（${bDates.length} 天）將改從 ${target} 開始生產；${target}（含）之後其他 ${pushed} 筆排程往後順延 ${bDates.length} 個工作天${skip ? '（跳過週六日）' : ''}，確定？`)) return;
+            faSnapshot();
+            line.rows.forEach(r => {
+                if (faKey(r) === b.key) r.date = map[r.date] || r.date;
+                else if ((r.date || '') >= target) r.date = faAddWorkdays(r.date, bDates.length, skip);
+            });
+            faSortRows(line);
+            faCloseModal('faJumpModal');
+            faSave('（跳批插單）');
+        }
+
+        // ---- 新增／編輯／刪除單筆 ----
+        function faOpenRow(idx) {
+            const line = faLine();
+            if (!line) { alert('目前沒有排程，請先到 Frozen 進度追蹤匯入'); return; }
+            faEditIdx = idx;
+            const r = idx >= 0 ? line.rows[idx] : null;
+            document.getElementById('faRowTitle').textContent = (r ? '✏️ 編輯排程（' : '➕ 新增排程（') + fzLine + '）';
+            document.getElementById('faRowDate').value = r ? r.date : todayStr();
+            document.getElementById('faRowPlan').value = r ? r.plan : '';
+            document.getElementById('faRowBatch').value = r ? r.batch : '';
+            document.getElementById('faRowPart').value = r ? r.part : '';
+            document.getElementById('faRowWo').value = r ? (r.wo || '') : '';
+            document.getElementById('faRowDesc').value = r ? (r.desc || '') : '';
+            document.getElementById('faRowMo').value = r && r.mo ? r.mo : '';
+            document.getElementById('faRowRate').value = r && r.rate ? r.rate : '';
+            document.getElementById('faRowSec').value = r && r.sec ? r.sec : '';
+            document.getElementById('faRowNote').value = r ? (r.note || '') : '';
+            document.getElementById('faRowPush').checked = false;
+            document.getElementById('faRowPushWrap').style.display = r ? 'none' : 'flex';
+            document.getElementById('faRowModal').classList.add('active');
+        }
+        function faSaveRow() {
+            const line = faLine();
+            if (!line) return;
+            const date = document.getElementById('faRowDate').value;
+            const batch = document.getElementById('faRowBatch').value.trim();
+            const plan = num(document.getElementById('faRowPlan').value);
+            if (!date || !batch || plan <= 0) { alert('日期、批次、排程量為必填（排程量需大於 0）'); return; }
+            const f = {
+                date, batch, plan,
+                part: document.getElementById('faRowPart').value.trim(),
+                wo: document.getElementById('faRowWo').value.trim(),
+                desc: document.getElementById('faRowDesc').value.trim(),
+                mo: num(document.getElementById('faRowMo').value),
+                rate: num(document.getElementById('faRowRate').value),
+                sec: num(document.getElementById('faRowSec').value),
+                note: document.getElementById('faRowNote').value.trim()
+            };
+            // 同批次已存在的話，空著的欄位自動帶既有資料（料號、規格、MO、產出、工時）
+            const twin = line.rows.find(r => r.batch === batch && (!f.part || r.part === f.part));
+            if (twin) {
+                if (!f.part) f.part = twin.part;
+                if (!f.desc) f.desc = twin.desc || '';
+                if (!f.wo) f.wo = twin.wo || '';
+                if (!f.mo) f.mo = twin.mo || 0;
+                if (!f.rate) f.rate = twin.rate || 0;
+                if (!f.sec) f.sec = twin.sec || 0;
+            }
+            faSnapshot();
+            if (faEditIdx >= 0) {
+                Object.assign(line.rows[faEditIdx], f);
+            } else {
+                if (document.getElementById('faRowPush').checked) {
+                    const skip = faSkip();
+                    line.rows.forEach(r => { if ((r.date || '') >= date) r.date = faAddWorkdays(r.date, 1, skip); });
+                }
+                line.rows.push(f);
+            }
+            faSortRows(line);
+            faCloseModal('faRowModal');
+            faSave(faEditIdx >= 0 ? '（編輯排程）' : '（新增排程）');
+        }
+        function faDeleteRow(idx) {
+            const line = faLine();
+            if (!line || !line.rows[idx]) return;
+            const r = line.rows[idx];
+            if (!confirm(`刪除 ${r.date} 批次「${r.batch}」排程量 ${Math.round(r.plan)} 這筆排程？\n（其他排程不會移動；要補位可用整批順延填負數）`)) return;
+            faSnapshot();
+            line.rows.splice(idx, 1);
+            faSave('（刪除排程）');
+        }
+
+        // ---- 匯出排程明細（一線一分頁、可直接再匯入進度追蹤）----
+        function faExport() {
+            if (!fzPlan.lines.length) { alert('目前沒有排程'); return; }
+            const wb = XLSX.utils.book_new();
+            fzPlan.lines.forEach(l => {
+                const aoa = [['裝配日期', '工單號碼', '批次', '零件編號', '規格敘述', 'MO量', '實際排程量', '每小時產出', '工時(秒)', '備註']];
+                l.rows.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '')).forEach(r =>
+                    aoa.push([r.date, r.wo || '', r.batch, r.part, r.desc || '', r.mo || '', r.plan, r.rate || '', r.sec || '', r.note || '']));
+                const ws = XLSX.utils.aoa_to_sheet(aoa);
+                ws['!cols'] = [{ wch: 11 }, { wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 28 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 8 }, { wch: 16 }];
+                XLSX.utils.book_append_sheet(wb, ws, l.name.replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 28));
+            });
+            XLSX.writeFile(wb, `Frozen排程明細_${todayStr().replace(/-/g, '')}.xlsx`);
+        }
+
+        // ---- 排程調整表（依日期分組；今天亮黃、週末橘、過期變淡）----
+        function faRender() {
+            const line = faLine();
+            if (!line) { faBatchList = []; return; }
+            document.getElementById('faLineName').textContent = fzLine;
+            // 批次清單（跳批選單用）：依首日排序
+            const bmap = {};
+            line.rows.forEach(r => {
+                const k = faKey(r);
+                if (!bmap[k]) bmap[k] = { key: k, batch: r.batch, part: r.part, first: r.date || '', dates: new Set() };
+                bmap[k].dates.add(r.date);
+                if (r.date && (!bmap[k].first || r.date < bmap[k].first)) bmap[k].first = r.date;
+            });
+            faBatchList = Object.values(bmap).sort((a, b) => a.first.localeCompare(b.first)).map(b => ({ ...b, days: b.dates.size }));
+            const bIdx = {};
+            faBatchList.forEach((b, i) => bIdx[b.key] = i);
+            const disp = line.rows.map((r, i) => ({ r, i })).sort((a, b) => (a.r.date || '').localeCompare(b.r.date || ''));
+            const today = todayStr();
+            let html = '<tr><th>批次</th><th>工單</th><th>零件編號</th><th>規格</th><th style="text-align:right;">MO量</th><th style="text-align:right;">排程量</th><th>備註</th><th>操作</th></tr>';
+            let curDate = null;
+            const seenBatch = {};
+            disp.forEach(({ r, i }) => {
+                if (r.date !== curDate) {
+                    curDate = r.date;
+                    const dayRows = disp.filter(x => x.r.date === curDate);
+                    const daySum = dayRows.reduce((s, x) => s + (x.r.plan || 0), 0);
+                    const wd = faWeekday(curDate);
+                    const cls = curDate === today ? 'fa-today' : ((wd === '六' || wd === '日') ? 'fa-wknd' : '');
+                    html += `<tr class="fa-date ${cls}"><td colspan="8">📆 ${esc(curDate.slice(5).replace('-', '/'))}（週${wd}）${curDate === today ? '・今天' : ''}　<span style="font-weight:normal;">${dayRows.length} 筆・合計 ${Math.round(daySum)} pcs</span></td></tr>`;
+                }
+                const k = faKey(r);
+                const jumpBtn = seenBatch[k] ? '' : `<button class="fa-mini" style="background:#a5820b;" title="這批插到別天，其他批順延" onclick="faOpenJump(${bIdx[k]})">🔀</button>`;
+                seenBatch[k] = true;
+                html += `<tr class="${(r.date || '') < today ? 'fa-past' : ''}">` +
+                    `<td><b>${esc(r.batch)}</b></td><td>${esc(r.wo || '')}</td><td>${esc(r.part)}</td><td style="color:#888;">${esc(r.desc || '')}</td>` +
+                    `<td style="text-align:right;">${r.mo || ''}</td><td style="text-align:right;"><b>${Math.round(r.plan)}</b></td><td>${esc(r.note || '')}</td>` +
+                    `<td>${jumpBtn}<button class="fa-mini" style="background:#7a8663;" onclick="faOpenRow(${i})">✏️</button><button class="fa-mini" style="background:#c0392b;" onclick="faDeleteRow(${i})">🗑</button></td></tr>`;
+            });
+            document.getElementById('faTable').innerHTML = html;
+        }
+
+        // ===== 初始化：讀取共用排程，即時同步 =====
+        function faInit() {
+            const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
+            if (p && p.lines) {
+                p.lines = (Array.isArray(p.lines) ? p.lines : Object.values(p.lines)).filter(Boolean);
+                p.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                fzPlan = p;
+            }
+            if (fzPlan.lines.length && !fzLine) fzLine = fzPlan.lines[0].name;
+            if (db) {
+                db.ref('toolbox/frozen/plan').on('value', s => {
+                    const v = s.val();
+                    if (v && v.lines) {
+                        v.lines = (Array.isArray(v.lines) ? v.lines : Object.values(v.lines)).filter(Boolean);
+                        v.lines.forEach(l => { l.rows = (Array.isArray(l.rows) ? l.rows : Object.values(l.rows || {})).filter(Boolean); });
+                        fzPlan = v;
+                        localStorage.setItem('fzPlan', JSON.stringify(v));
+                        if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines.length ? fzPlan.lines[0].name : '';
+                    }
+                    fzRenderAll();
+                });
+            }
+            fzRenderAll();
+        }
+        faInit();
+    </script>
+</body>
+</html>
