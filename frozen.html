@@ -145,6 +145,18 @@
         input.meta-in.num { width: 66px; text-align: right; }
         input.meta-in.idn { width: 112px; }
         tr.lag-hidden td { opacity: 0.5; background: #f5f5f5; }
+        /* 看板算法明細視窗 */
+        .calc-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 200; align-items: center; justify-content: center; padding: 15px; }
+        .calc-modal.active { display: flex; }
+        .calc-box { background: white; border-radius: 10px; padding: 18px 20px; width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto; }
+        .calc-box h3 { color: #55503f; margin-bottom: 4px; }
+        .calc-box table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+        .calc-box th { background: #f5f6fa; padding: 6px 7px; text-align: left; color: #555; white-space: nowrap; }
+        .calc-box td { padding: 5px 7px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        .calc-box tr.ahead td { color: #2b8a3e; }
+        .calc-box tr.sub td { background: #faf7ef; font-weight: bold; color: #55503f; }
+        .calc-box .neg { color: #dc3545; font-weight: bold; }
+        .calc-box .pos { color: #2b8a3e; font-weight: bold; }
         /* 落後彙整的刪除／恢復小按鈕 */
         .fa-mini { border: none; border-radius: 5px; padding: 3px 9px; font-size: 12px; cursor: pointer; margin-right: 3px; color: white; }
     </style>
@@ -220,6 +232,17 @@
             「完成量」欄輸入的是上面選的「輸入日期」那天的量（通常填昨天），填完按「儲存完成量」。只看近期＝基準日前後 14/7 天內有排程、或還有尾數的批次。<br>
             <b>達成率看板</b>：選一個日期，每張卡同時顯示該天、當月（1 日～該日）、今年（1/1～該日，到年底即年達成率）達成率、該線總落後時數、現在做的批次與下一批預計日。<b>⚠️ 落後警訊</b>＝整線落後 ≥ 8 小時或 1 人工時落後 ≥ 24 小時。<b>生管指示</b>：看板下方操作區點「⚡ 需追趕」或「🛠 可落後」（再點一次取消），會以大字橫幅顯示在該線卡片內，全員同步、日報帶出；按鈕在看板外，截圖看板不會拍到。<b>📋 複製日報／✉️ 郵件日報</b>：一鍵產生文字版日報（各線達成率＋現況＋落後彙整含出貨日/缺料），直接貼進郵件寄出。<b>落後彙整表</b>：自動列出所有產線落後中的批次，「出貨日」「缺料狀況」可直接填，填完自動儲存並同步到其他人的畫面；匯出 Excel 時會多一頁「落後彙整」。<br>
             <b>每週更新 Frozen 表</b>：先在「匯入起算日」選新排程生效日（例如下週一），再匯入新檔 → 只會替換該日（含）之後的排程；之前的排程、期初落後、尾數基準與已填完成量都保留。留空匯入＝整批覆蓋。
+        </div>
+    </div>
+
+    <!-- 看板算法明細 -->
+    <div id="fzCalcModal" class="calc-modal" onclick="if(event.target===this)this.classList.remove('active')">
+        <div class="calc-box">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <h3 id="fzCalcTitle">總落後時數算法</h3>
+                <button class="export-btn" onclick="document.getElementById('fzCalcModal').classList.remove('active')">關閉</button>
+            </div>
+            <div id="fzCalcBody"></div>
         </div>
     </div>
 
@@ -443,6 +466,69 @@
         }
         // 落後警訊門檻：整線落後 ≥ 8 小時、或 1 人工時落後 ≥ 24 小時
         const fzWarn = (lineHr, oneHr) => lineHr >= 8 || oneHr >= 24;
+
+        // 看板「總落後時數」算法明細：逐批列出、落後算正超前算負，淨值＝看板顯示值
+        function fzShowCalc(lineName) {
+            const line = fzPlan.lines.find(l => l.name === lineName);
+            if (!line) return;
+            const day = document.getElementById('fzDay').value || addDays(todayStr(), -1);
+            const list = fzAggregate(line, day);   // 與看板 fzLineHours 用同一份資料、同一天
+            document.getElementById('fzCalcTitle').textContent = `🧮 ${lineName} 總落後時數算法（截至 ${day}）`;
+            const groups = [
+                { base: '線', label: '整條線時間（每小時產出）', total: 0, lagSum: 0, aheadSum: 0, rows: [] },
+                { base: '1人', label: '1 人工時（工時秒/台）', total: 0, lagSum: 0, aheadSum: 0, rows: [] }
+            ];
+            const noWt = [];
+            list.forEach(a => {
+                if (a.behindHr == null) { if (Math.abs(a.behind) > 0.01) noWt.push(a); return; }
+                const g = groups.find(x => x.base === a.hrBase);
+                if (!g) return;
+                g.rows.push(a); g.total += a.behindHr;
+                if (a.behind > 0) g.lagSum += a.behindHr; else g.aheadSum += -a.behindHr;
+            });
+            // 對照「落後彙整表」小計（用基準日 fzBase、只算落後、且套用你手改的欄位）
+            const baseDs = document.getElementById('fzBase').value || todayStr();
+            const lagRows = fzLagRows(line, baseDs).filter(r => !r.eff.hidden);
+            let lagLine = 0, lagOne = 0, overrideCnt = 0;
+            lagRows.forEach(r => {
+                if (r.eff.behind > 0 && r.eff.behindHr != null) {
+                    if (r.eff.hrBase === '線') lagLine += r.eff.behindHr; else if (r.eff.hrBase === '1人') lagOne += r.eff.behindHr;
+                }
+                if (['due', 'done', 'behind', 'behindHr', 'batch', 'part'].some(f => r.m[f] != null && r.m[f] !== '')) overrideCnt++;
+            });
+            const totalAhead = groups.reduce((s, g) => s + g.aheadSum, 0);
+            const reasons = [];
+            if (totalAhead > 0.05) reasons.push(`有<b>超前批次</b>抵銷了約 ${Math.round(totalAhead * 10) / 10} 小時（看板會扣、落後彙整表不扣）`);
+            if (overrideCnt > 0) reasons.push(`落後彙整表有 <b>${overrideCnt} 筆你手改過的欄位</b>（藍框）→ 那張表用你改的值、看板用原始計算值`);
+            if (baseDs !== day) reasons.push(`落後彙整表用<b>基準日 ${baseDs}</b>、看板用<b>統計日 ${day}</b>，日期不同批次範圍也會不同`);
+            if (noWt.length) reasons.push(`有 ${noWt.length} 批沒設工時、無法換算，兩邊都不計入`);
+            reasons.push(`各批四捨五入到 0.1 小時，逐批相加可能與總數差一點點`);
+            let html = `<div style="background:#faf7ef;border:1px solid #ece3cf;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.85;">
+                <b>🟢 看板總落後時數</b>（統計日 ${day}・淨值）：${fzHrText(groups[0].total, groups[1].total)}<br>
+                <b>📋 落後彙整表小計</b>（基準日 ${baseDs}・只算落後・含手改）：${fzHrText(lagLine, lagOne)}<br>
+                <span style="color:#666;">兩者可能不同的原因：</span><br>${reasons.map(r => '・' + r).join('<br>')}</div>
+                <p style="font-size:12.5px;color:#666;line-height:1.75;margin-top:10px;">
+                看板算法＝<b>每一批的落後時數全部相加，落後算正、超前算負</b>（互相抵銷）＝「淨落後」。每批落後時數＝落後台數 × 該料號工時（抓「料號工時彙整」生效值，沒設定的用 Frozen 表內建）。下面逐批列出：</p>`;
+            groups.forEach(g => {
+                if (!g.rows.length) return;
+                html += `<div style="margin-top:14px;font-weight:bold;color:#55503f;">${g.label}</div>`;
+                html += `<table><tr><th>批次</th><th>料號</th><th style="text-align:right;">落後台</th><th style="text-align:right;">工時</th><th style="text-align:right;">落後時</th></tr>`;
+                g.rows.slice().sort((x, y) => y.behindHr - x.behindHr).forEach(a => {
+                    const ahead = a.behind < 0;
+                    const wt = g.base === '線' ? (a.wtRate ? a.wtRate + ' /hr' : '—') : (a.wtSec ? a.wtSec + ' 秒' : '—');
+                    html += `<tr class="${ahead ? 'ahead' : ''}"><td>${esc(a.batch)}</td><td style="color:#999;">${esc(a.part)}</td>
+                        <td style="text-align:right;">${Math.round(a.behind)}</td><td style="text-align:right;">${wt}</td>
+                        <td style="text-align:right;" class="${ahead ? 'pos' : 'neg'}">${ahead ? '超前 ' : ''}${Math.round(Math.abs(a.behindHr) * 10) / 10}</td></tr>`;
+                });
+                html += `<tr class="sub"><td colspan="4">落後小計（只算落後批次）</td><td style="text-align:right;" class="neg">${Math.round(g.lagSum * 10) / 10} 小時</td></tr>`;
+                if (g.aheadSum > 0.05) html += `<tr class="sub"><td colspan="4">超前抵銷（超前批次）</td><td style="text-align:right;" class="pos">− ${Math.round(g.aheadSum * 10) / 10} 小時</td></tr>`;
+                html += `<tr class="sub"><td colspan="4">= 淨落後（看板顯示）</td><td style="text-align:right;">${Math.round(g.total * 10) / 10} 小時（${g.base}）</td></tr></table>`;
+            });
+            if (noWt.length) html += `<p style="font-size:12px;color:#c0392b;margin-top:12px;">⚠️ 這 ${noWt.length} 批有落後/超前，但料號沒設定工時、無法換算時數，不計入總落後：${noWt.map(a => esc(a.batch)).join('、')}。可到「料號工時彙整」補工時。</p>`;
+            if (!groups.some(g => g.rows.length)) html += `<p style="margin-top:12px;color:#999;">此產線目前沒有可換算時數的批次。</p>`;
+            document.getElementById('fzCalcBody').innerHTML = html;
+            document.getElementById('fzCalcModal').classList.add('active');
+        }
         // 產線現況：現在做哪一批＝依排程「今天正在做的」未完批次（不是最落後那批）＋下一批預計日
         // 尾數以今天為準；排程涵蓋今天的批次優先，沒有就取已開始(排程日≤今天)且未完、最晚開始的
         function fzLineNow(line) {
@@ -564,7 +650,7 @@
                     ${main ? `<div class="bd-pct ${pcls(main.pct)}">${mainTxt}<span style="font-size:13px;color:#999;font-weight:normal;"> ${esc(main.label)}</span></div>
                     <div class="bd-sub">${main.label} 應 ${Math.round(main.due)}・完成 ${Math.round(main.done)}${subLines ? '<br>' + subLines : ''}</div>` :
                     (subLines ? `<div class="bd-sub">${subLines}</div>` : '')}
-                    <div class="bd-mini">總落後時數：<br><span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}" style="font-size:16px;">${fzHrText(lineHr, oneHr).replace(/落後 (?=\d)/g, '')}</span></div>
+                    <div class="bd-mini">總落後時數：<a onclick="event.stopPropagation();fzShowCalc('${line.name.replace(/'/g, "\\'")}')" style="cursor:pointer;color:#7a8663;font-size:12px;text-decoration:underline;">🧮 算法</a><br><span class="bd-behind ${(lineHr > 0.05 || oneHr > 0.05) ? 'neg' : 'pos'}" style="font-size:16px;">${fzHrText(lineHr, oneHr).replace(/落後 (?=\d)/g, '')}</span></div>
                     <div class="bd-mini bd-now">▶ 現在：${esc(nd.cur)}${nd.curEdited ? ' <span style="color:#a06e44;">✎</span>' : ''}<br>⏭ 下一批：${esc(nd.next)}${nd.nextEdited ? ' <span style="color:#a06e44;">✎</span>' : ''}</div>
                     ${st === 'chase' ? '<div class="bd-flagbar chase">⚡ 需追趕</div>' : ''}
                     ${st === 'adjust' ? '<div class="bd-flagbar adjust">🛠 可落後生管調整</div>' : ''}
