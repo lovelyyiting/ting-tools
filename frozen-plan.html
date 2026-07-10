@@ -99,6 +99,7 @@
             <button class="export-btn" onclick="faExport()">⬇️ 匯出排程明細</button>
             <label><input type="checkbox" id="faSkipWknd" checked> 順延跳過週六日</label>
             <a class="link-btn" href="frozen.html">🧊 進度追蹤</a>
+            <button class="export-btn" style="border-color:#dc3545;color:#dc3545;margin-left:auto;" onclick="faWipe()">🗑 一鍵刪除</button>
         </div>
 
         <div class="planstat" id="fzStat">載入中…</div>
@@ -455,6 +456,25 @@
             document.getElementById('faTable').innerHTML = html;
         }
 
+        // ===== 一鍵刪除：清空雲端 toolbox/frozen 全部節點＋本機快取 =====
+        // 與 Frozen 進度追蹤／車種產量共用同一份資料，任何一頁刪都是全刪
+        function faWipe() {
+            if (!confirm('確定要一鍵刪除全部 Frozen 資料？\n\n會清空雲端與本機的：排程、完成量、出貨日/缺料備註、生管指示、現在/下一批微調。\nFrozen 進度追蹤、排程調整、車種產量統計三個頁面都會清空，所有人同步，無法復原。')) return;
+            if (!confirm('再確認一次：真的要刪除全部 Frozen 資料？')) return;
+            fzPlan = { updatedAt: '', lines: [] };
+            fzLine = '';
+            faUndoStack = [];
+            ['fzPlan','fzDone','fzMeta','fzChase','fzNow'].forEach(k => localStorage.removeItem(k));
+            fzRenderAll();
+            if (db) {
+                db.ref('toolbox/frozen').remove()
+                    .then(() => alert('已刪除：雲端與本機的 Frozen 資料已全部清空'))
+                    .catch(e => alert('雲端刪除失敗：' + e.message + '\n本機已清空，請確認網路後再按一次'));
+            } else {
+                alert('目前離線：本機資料已清空，雲端請連上網後再刪一次');
+            }
+        }
+
         // ===== 初始化：讀取共用排程，即時同步 =====
         function faInit() {
             const p = JSON.parse(localStorage.getItem('fzPlan') || 'null');
@@ -479,6 +499,11 @@
                         fzPlan = v;
                         localStorage.setItem('fzPlan', JSON.stringify(v));
                         if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines.length ? fzPlan.lines[0].name : '';
+                    } else {
+                        // 雲端為準：被一鍵刪除後，其他人開著的畫面與本機快取也要清空
+                        fzPlan = { updatedAt: '', lines: [] };
+                        fzLine = '';
+                        localStorage.removeItem('fzPlan');
                     }
                     fzRenderAll();
                 });

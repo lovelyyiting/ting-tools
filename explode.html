@@ -84,6 +84,12 @@
         .empty-hint { text-align: center; color: #999; padding: 40px 10px; font-size: 15px; }
         .hidden { display: none; }
         .note { font-size: 12px; color: #999; margin-top: 10px; line-height: 1.6; }
+        .del-btn {
+            background: white; color: #dc3545; border: 1px solid #dc3545;
+            padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer;
+        }
+        .del-btn:hover { background: #dc3545; color: white; }
+        .deliv-opt { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: #555; margin-right: 16px; cursor: pointer; }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
@@ -98,7 +104,9 @@
         </div>
 
         <div class="body">
-            <div class="step-title">① 匯入兩個檔案（每天重匯即可，會取代前一天）</div>
+            <div class="step-title" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;">① 匯入兩個檔案（每天重匯即可，會取代前一天）
+                <button class="del-btn" style="margin-left:auto;" onclick="wipeAll()">🗑 一鍵刪除全部資料</button>
+            </div>
             <div class="import-grid">
                 <div class="imp-card main">
                     <h4>⭐ 佔量結果（B）</h4>
@@ -124,6 +132,7 @@
             </div>
 
             <div class="run-row">
+                <label class="deliv-opt"><input type="checkbox" id="useDelivery" checked> 本次展出計算物料達交</label>
                 <button class="run-btn" onclick="explode()">🧩 展出缺料清單</button>
             </div>
 
@@ -200,8 +209,12 @@
                         if (v) {
                             if (!Array.isArray(v.rows)) v.rows = Object.values(v.rows||{});
                             store[k] = v; localStorage.setItem('exp_'+k, JSON.stringify(v));
-                            renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
+                        } else {
+                            // 雲端為準：被一鍵刪除後，其他人開著的畫面與本機快取也要清空
+                            store[k] = { updatedAt:'', rows: [] };
+                            localStorage.removeItem('exp_'+k);
                         }
+                        renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
                     });
                 });
             }
@@ -371,7 +384,8 @@
 
             // ===== 達交交期比對：同料號在途依交期先後，分給需求日最早的缺料列 =====
             const judge = new Array(B.rows.length).fill(null);
-            const deliv = store.delivery.rows || [];
+            const useDeliv = document.getElementById('useDelivery').checked;
+            const deliv = useDeliv ? (store.delivery.rows || []) : [];
             let jOk = 0, jLate = 0, jBad = 0;
             if (deliv.length) {
                 const today = todayStr();
@@ -452,6 +466,7 @@
             if (naItem) warns.push(`有 <b>${naItem}</b> 筆查無項次/批次`);
             if (naVendor) warns.push(`有 <b>${naVendor}</b> 筆查無廠商（可更新料號廠商對照表）`);
             if (deliv.length) warns.push(`達交判定：✅可滿足 <b>${jOk}</b> 筆・⚠️晚到/逾期 <b>${jLate}</b> 筆・❌無在途/不足 <b>${jBad}</b> 筆`);
+            else if (!useDeliv) warns.push('已取消勾選「本次展出計算物料達交」，本次展出不含達交判定');
             else warns.push('未匯入「物料達交交期」，本次展出沒有達交判定（要看近期到料能否滿足，請匯入採購單交期檔）');
             document.getElementById('warnArea').innerHTML = warns.length ? `<div class="warnbox">⚠️ ${warns.join('<br>')}</div>` : '';
 
@@ -476,6 +491,26 @@
                     if (c === '達交判定' && r._jcls) cls = r._jcls;
                     return `<td class="${cls}">${esc(r[c])}</td>`;
                 }).join('') + '</tr>').join('');
+        }
+
+        // 一鍵刪除：清空雲端 toolbox/explode 全部節點＋本機快取（所有人畫面同步清空）
+        function wipeAll() {
+            if (!confirm('確定要一鍵刪除？\n\n會清空雲端與本機的：佔量結果、今日主檔、達交交期、展出結果。\n所有人開著的畫面都會同步清空，無法復原。')) return;
+            if (!confirm('再確認一次：真的要刪除全部缺料模擬資料？')) return;
+            ['allocation','woMain','woPrecision','vendor','delivery'].forEach(k => {
+                store[k] = { updatedAt:'', rows: [] };
+                localStorage.removeItem('exp_'+k);
+            });
+            result = { main: [], prec: [], none: [] };
+            document.getElementById('resultArea').classList.add('hidden');
+            renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
+            if (db) {
+                db.ref('toolbox/explode').remove()
+                    .then(() => alert('已刪除：雲端與本機的缺料模擬資料已全部清空'))
+                    .catch(e => alert('雲端刪除失敗：' + e.message + '\n本機已清空，請確認網路後再按一次'));
+            } else {
+                alert('目前離線：本機資料已清空，雲端請連上網後再刪一次');
+            }
         }
 
         function downloadResult() {

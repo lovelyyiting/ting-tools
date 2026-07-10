@@ -182,6 +182,7 @@
             <label><input type="checkbox" id="fzRecent" checked onchange="fzRender()"> 只看近期批次</label>
             <button class="export-btn" onclick="fzExport()">⬇️ 匯出 Excel</button>
             <a class="export-btn" href="frozen-plan.html" style="text-decoration:none;border-color:#bd8a63;background:#fff8f0;color:#a06e44;">📅 排程調整</a>
+            <button class="export-btn" style="border-color:#dc3545;color:#dc3545;margin-left:auto;" onclick="fzWipe()">🗑 一鍵刪除</button>
         </div>
 
         <div class="planstat" id="fzStat">尚未匯入 Frozen 表</div>
@@ -969,6 +970,34 @@
             XLSX.writeFile(wb, `Frozen進度_${baseDs}.xlsx`);
         }
 
+        // ===== 一鍵刪除：清空雲端 toolbox/frozen 全部節點＋本機快取 =====
+        // Frozen 進度追蹤／排程調整／車種產量三頁共用同一份資料，任何一頁刪都是全刪
+        function fzClearPlanLocal() {
+            fzPlan = { updatedAt: '', lines: [] };
+            fzLine = '';
+            localStorage.removeItem('fzPlan');
+            document.getElementById('fzBoardSec').style.display = 'none';
+            document.getElementById('fzLagSec').style.display = 'none';
+            document.getElementById('fzTabs').innerHTML = '';
+            document.getElementById('fzSummary').innerHTML = '';
+            document.getElementById('fzTable').innerHTML = '<tr><td><div class="empty-hint">請先匯入 Frozen 表 Excel（工具會自動辨識各產線分頁）</div></td></tr>';
+            fzRenderAll();
+        }
+        function fzWipe() {
+            if (!confirm('確定要一鍵刪除全部 Frozen 資料？\n\n會清空雲端與本機的：排程、完成量、出貨日/缺料備註、生管指示、現在/下一批微調。\nFrozen 進度追蹤、排程調整、車種產量統計三個頁面都會清空，所有人同步，無法復原。')) return;
+            if (!confirm('再確認一次：真的要刪除全部 Frozen 資料？')) return;
+            fzDone = {}; fzMeta = {}; fzChase = {}; fzNow = {};
+            ['fzDone','fzMeta','fzChase','fzNow'].forEach(k => localStorage.removeItem(k));
+            fzClearPlanLocal();
+            if (db) {
+                db.ref('toolbox/frozen').remove()
+                    .then(() => alert('已刪除：雲端與本機的 Frozen 資料已全部清空'))
+                    .catch(e => alert('雲端刪除失敗：' + e.message + '\n本機已清空，請確認網路後再按一次'));
+            } else {
+                alert('目前離線：本機資料已清空，雲端請連上網後再刪一次');
+            }
+        }
+
         // ===== 初始化 =====
         function fzInit() {
             // 基準日預設昨天：每天看的是「截至昨天(含)」應完成 vs 實際完成
@@ -1014,6 +1043,9 @@
                         fzPlan = v; localStorage.setItem('fzPlan', JSON.stringify(v));
                         if (!fzPlan.lines.find(l => l.name === fzLine)) fzLine = fzPlan.lines.length ? fzPlan.lines[0].name : '';
                         fzRenderAll();
+                    } else {
+                        // 雲端為準：被一鍵刪除後，其他人開著的畫面與本機快取也要清空
+                        fzClearPlanLocal();
                     }
                 });
                 // 雲端為準：空值也要覆蓋本地快取，避免清空後舊資料復活
