@@ -513,9 +513,58 @@
             }
         }
 
+        // 結論危險度：❌無在途→❌在途不足→⚠️晚到→⚠️含逾期→✅可滿足→(空白/無判定) 排最後
+        function verdictRank(v) {
+            v = String(v || '');
+            if (!v) return 5;
+            if (v.startsWith('❌無在途')) return 0;
+            if (v.startsWith('❌')) return 1;   // 在途不足
+            if (v.startsWith('⚠️晚')) return 2; // 晚N天到齊
+            if (v.startsWith('⚠️')) return 3;   // 量夠但含逾期在途
+            if (v.startsWith('✅')) return 4;   // 可滿足
+            return 5;
+        }
+        // 需求日期（顯示為 y/m/d）轉可比較陣列，空值排最後
+        function needKey(s) {
+            const p = String(s || '').split('/').map(Number);
+            if (p.length < 3 || p.some(isNaN)) return [9999, 99, 99];
+            return p;
+        }
+        function cmpArr(a, b) { for (let i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] - b[i]; } return 0; }
+
+        // 總彙整表：產線＋精密＋未分類合成一張，同「結論|需求日期|訂單|批次|物料|廠商」加總物料短缺，
+        // 依結論危險度（最危險在前、可滿足在後）→需求日→訂單→批次→物料 排序，給採購一眼看催料
+        function buildSummaryAoa() {
+            const SUM_COLS = ['結論', '需求日期', '訂單', '批次', '物料', '物料短文', '廠商', '短缺加總', '預計到齊', '在途分配', '分類'];
+            const tag = { main: '產線', prec: '精密', none: '未分類' };
+            const map = {};
+            ['main', 'prec', 'none'].forEach(g => (result[g] || []).forEach(r => {
+                const key = [r['達交判定'], r['需求日期'], r['訂單'], r['批次'], r['物料'], r['廠商']].join('');
+                if (!map[key]) map[key] = {
+                    '結論': r['達交判定'] || '', '需求日期': r['需求日期'] || '', '訂單': r['訂單'] || '',
+                    '批次': r['批次'] || '', '物料': r['物料'] || '', '物料短文': r['物料短文'] || '',
+                    '廠商': r['廠商'] || '', '短缺加總': 0, '預計到齊': r['預計到齊'] || '',
+                    '在途分配': r['在途分配'] || '', '分類': tag[g]
+                };
+                map[key]['短缺加總'] += num(r['物料短缺']);
+            }));
+            const list = Object.values(map).sort((a, b) =>
+                verdictRank(a['結論']) - verdictRank(b['結論']) ||
+                cmpArr(needKey(a['需求日期']), needKey(b['需求日期'])) ||
+                String(a['訂單']).localeCompare(String(b['訂單'])) ||
+                String(a['批次']).localeCompare(String(b['批次'])) ||
+                String(a['物料']).localeCompare(String(b['物料']))
+            );
+            const aoa = [SUM_COLS];
+            list.forEach(r => aoa.push(SUM_COLS.map(c => r[c])));
+            return aoa;
+        }
+
         function downloadResult() {
             if (!result.main.length && !result.prec.length && !result.none.length) { alert('沒有可下載的結果，請先展出'); return; }
             const wb = XLSX.utils.book_new();
+            const sumAoa = buildSummaryAoa();
+            if (sumAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '總彙整表');
             const add = (rows, name) => { if(rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([OUT_COLS].concat(rows.map(r=>OUT_COLS.map(c=>r[c])))), name); };
             add(result.main, '產線缺料'); add(result.prec, '精密缺料'); add(result.none, '未分類');
             XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
