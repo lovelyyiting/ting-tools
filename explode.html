@@ -145,11 +145,12 @@
                     <div class="tab active" data-g="main" onclick="switchTab('main')">產線缺料 <span id="cnt-main"></span></div>
                     <div class="tab" data-g="prec" onclick="switchTab('prec')">精密缺料 <span id="cnt-prec"></span></div>
                     <div class="tab" data-g="none" onclick="switchTab('none')">未分類 <span id="cnt-none"></span></div>
-                    <button class="dl-btn" onclick="downloadResult()">⬇️ 下載結果 Excel</button>
+                    <label class="deliv-opt" style="margin-left:auto;"><input type="checkbox" id="attachSources"> 下載時附主檔A＋達交交期分頁</label>
+                    <button class="dl-btn" style="margin-left:0;" onclick="downloadResult()">⬇️ 下載結果 Excel</button>
                 </div>
                 <div class="table-wrap"><table class="data" id="resultTable"></table></div>
                 <div class="note">分類方式：訂單出現在成車工單表→產線；出現在精密機電工單表→精密；兩表都查不到→未分類。項次/批次由工單表帶入、廠商由料號廠商對照表帶入，查不到標「查無」。<br>
-                達交判定（需匯入達交交期）：同料號的在途量依交期先後、優先分配給需求日最早的缺料列；「預計到齊」＝該列短缺量被在途補滿的那天。✅可滿足＝到齊日不晚於需求日；⚠️晚N天＝到齊日超過需求日；❌＝沒有在途或在途量不夠。交期已過但仍列在途的會標「含逾期在途」提醒催料。</div>
+                達交判定（需匯入達交交期）：同料號的在途量依交期先後、優先分配給需求日最早的缺料列；「預計到齊」＝該列短缺量被在途補滿的那天。✅可滿足＝到齊日不晚於需求日；⚠️晚N天＝到齊日超過需求日；❌＝沒有在途或在途量不夠。交期已過但仍列在途的會標「發貨單過期」提醒催料。</div>
             </div>
         </div>
     </div>
@@ -422,7 +423,7 @@
                             const days = Math.round((new Date(doneDate) - new Date(needDs)) / 86400000);
                             verdict = `⚠️晚${days}天到齊`; cls = 'jlate'; jLate++;
                         } else if (pastDue) {
-                            verdict = '⚠️量夠但含逾期在途(請催)'; cls = 'jlate'; jLate++;
+                            verdict = '⚠️發貨單過期'; cls = 'jlate'; jLate++;
                         } else { jOk++; }
                         judge[o.i] = { done: doneDate ? fmtNeed(doneDate) : '', verdict, alloc: allocStr, cls };
                     });
@@ -515,14 +516,14 @@
             }
         }
 
-        // 結論危險度：❌無在途→❌在途不足→⚠️晚到→⚠️含逾期→✅可滿足→(空白/無判定) 排最後
+        // 結論危險度：❌無在途→❌在途不足→⚠️晚到→⚠️發貨單過期→✅可滿足→(空白/無判定) 排最後
         function verdictRank(v) {
             v = String(v || '');
             if (!v) return 5;
             if (v.startsWith('❌無在途')) return 0;
             if (v.startsWith('❌')) return 1;   // 在途不足
             if (v.startsWith('⚠️晚')) return 2; // 晚N天到齊
-            if (v.startsWith('⚠️')) return 3;   // 量夠但含逾期在途
+            if (v.startsWith('⚠️')) return 3;   // 發貨單過期
             if (v.startsWith('✅')) return 4;   // 可滿足
             return 5;
         }
@@ -562,6 +563,13 @@
             return aoa;
         }
 
+        // 把已解析的原始資料(rows)依欄位對應轉成 aoa，供附加分頁用
+        function srcAoa(rows, cols) {
+            const aoa = [cols.map(c => c[1])];
+            rows.forEach(r => aoa.push(cols.map(c => { const v = r[c[0]]; return v == null ? '' : v; })));
+            return aoa;
+        }
+
         function downloadResult() {
             if (!result.main.length && !result.prec.length && !result.none.length) { alert('沒有可下載的結果，請先展出'); return; }
             const wb = XLSX.utils.book_new();
@@ -569,6 +577,16 @@
             if (sumAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '總彙整表');
             const add = (rows, name) => { if(rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([OUT_COLS].concat(rows.map(r=>OUT_COLS.map(c=>r[c])))), name); };
             add(result.main, '產線缺料'); add(result.prec, '精密缺料'); add(result.none, '未分類');
+            // 勾選時：把主檔A與達交交期原始資料放進同一個 Excel，各自獨立分頁（不影響原本下載）
+            const chk = document.getElementById('attachSources');
+            if (chk && chk.checked) {
+                const addSrc = (rows, cols, name) => { if (rows && rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(srcAoa(rows, cols)), name); };
+                const woCols = [['order','工單'],['item','項次'],['batch','批次'],['line','線別']];
+                addSrc(store.woMain.rows, woCols, '主檔A-成車工單');
+                addSrc(store.woPrecision.rows, woCols, '主檔A-精密工單');
+                addSrc(store.vendor.rows, [['mat','物料'],['vendor','廠商']], '主檔A-廠商對照');
+                addSrc(store.delivery.rows, [['mat','物料'],['qty','供應數量'],['date','交期']], '達交交期在途');
+            }
             XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
         }
 
