@@ -195,7 +195,8 @@
             woMain: load('woMain'),
             woPrecision: load('woPrecision'),
             vendor: load('vendor'),
-            delivery: load('delivery')
+            delivery: load('delivery'),
+            masterRaw: load('masterRaw')
         };
         function load(k){ return JSON.parse(localStorage.getItem('exp_'+k) || 'null') || { updatedAt:'', rows:[] }; }
         function save(k){ localStorage.setItem('exp_'+k, JSON.stringify(store[k])); if(db) db.ref('toolbox/explode/'+k).set(store[k]); }
@@ -206,11 +207,18 @@
         function initData() {
             renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
             if (db) {
-                ['allocation','woMain','woPrecision','vendor','delivery'].forEach(k => {
+                ['allocation','woMain','woPrecision','vendor','delivery','masterRaw'].forEach(k => {
                     db.ref('toolbox/explode/'+k).on('value', snap => {
                         const v = snap.val();
                         if (v) {
                             if (!Array.isArray(v.rows)) v.rows = Object.values(v.rows||{});
+                            if (k === 'masterRaw') {
+                                if (!Array.isArray(v.sheets)) v.sheets = Object.values(v.sheets||{});
+                                v.sheets.forEach(s => {
+                                    if (!Array.isArray(s.aoa)) s.aoa = Object.values(s.aoa||{});
+                                    s.aoa = s.aoa.map(row => Array.isArray(row) ? row : (row == null ? [] : Object.values(row)));
+                                });
+                            }
                             store[k] = v; localStorage.setItem('exp_'+k, JSON.stringify(v));
                         } else {
                             // 雲端為準：被一鍵刪除後，其他人開著的畫面與本機快取也要清空
@@ -328,6 +336,9 @@
                         report.push(`⚠️ 找不到「${label}」分頁`);
                     }
                 });
+                // 另存主檔全部分頁的原始內容（一模一樣），下載勾選附檔時直接照放
+                store.masterRaw = { updatedAt: now, sheets: wb.SheetNames.map(n => ({ name: n, aoa: sheetToAoa(wb, n) })) };
+                save('masterRaw');
                 renderMasterStatus();
                 alert('主檔匯入完成：\n' + report.join('\n') +
                     '\n\n偵測到的分頁：' + wb.SheetNames.join('、'));
@@ -500,7 +511,7 @@
         function wipeAll() {
             if (!confirm('確定要一鍵刪除？\n\n會清空雲端與本機的：佔量結果、今日主檔、達交交期、展出結果。\n所有人開著的畫面都會同步清空，無法復原。')) return;
             if (!confirm('再確認一次：真的要刪除全部缺料模擬資料？')) return;
-            ['allocation','woMain','woPrecision','vendor','delivery'].forEach(k => {
+            ['allocation','woMain','woPrecision','vendor','delivery','masterRaw'].forEach(k => {
                 store[k] = { updatedAt:'', rows: [] };
                 localStorage.removeItem('exp_'+k);
             });
@@ -577,15 +588,31 @@
             if (sumAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '總彙整表');
             const add = (rows, name) => { if(rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([OUT_COLS].concat(rows.map(r=>OUT_COLS.map(c=>r[c])))), name); };
             add(result.main, '產線缺料'); add(result.prec, '精密缺料'); add(result.none, '未分類');
-            // 勾選時：把主檔A與達交交期原始資料放進同一個 Excel，各自獨立分頁（不影響原本下載）
+            // 勾選時：把主檔A與達交交期放進同一個 Excel，各自獨立分頁（不影響原本下載）
             const chk = document.getElementById('attachSources');
             if (chk && chk.checked) {
-                const addSrc = (rows, cols, name) => { if (rows && rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(srcAoa(rows, cols)), name); };
-                const woCols = [['order','工單'],['item','項次'],['batch','批次'],['line','線別']];
-                addSrc(store.woMain.rows, woCols, '主檔A-成車工單');
-                addSrc(store.woPrecision.rows, woCols, '主檔A-精密工單');
-                addSrc(store.vendor.rows, [['mat','物料'],['vendor','廠商']], '主檔A-廠商對照');
-                addSrc(store.delivery.rows, [['mat','物料'],['qty','供應數量'],['date','交期']], '達交交期在途');
+                // 分頁名稱處理：去掉 Excel 不允許的字元、限 31 字、避免重名
+                const addSheet = (aoa, name) => {
+                    let nm = String(name).replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 31) || 'Sheet';
+                    const base = nm; let n = 2;
+                    while (wb.SheetNames.includes(nm)) nm = base.slice(0, 28) + '_' + n++;
+                    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), nm);
+                };
+                // 主檔A：附「當時匯入的原始分頁內容」，一模一樣照放
+                const mr = store.masterRaw;
+                if (mr && mr.sheets && mr.sheets.length) {
+                    mr.sheets.forEach(s => { if (s.aoa && s.aoa.length) addSheet(s.aoa, '主檔A-' + s.name); });
+                } else {
+                    // 舊資料沒存原始內容：先附欄位擷取版，提醒重匯一次主檔
+                    alert('提醒：目前儲存的主檔是舊版格式，這次附的是欄位擷取版。\n重新匯入一次「今日主檔」後，下載就會附上跟原檔一模一樣的分頁內容。');
+                    const addSrc = (rows, cols, name) => { if (rows && rows.length) addSheet(srcAoa(rows, cols), name); };
+                    const woCols = [['order','工單'],['item','項次'],['batch','批次'],['line','線別']];
+                    addSrc(store.woMain.rows, woCols, '主檔A-成車工單');
+                    addSrc(store.woPrecision.rows, woCols, '主檔A-精密工單');
+                    addSrc(store.vendor.rows, [['mat','物料'],['vendor','廠商']], '主檔A-廠商對照');
+                }
+                if (store.delivery.rows && store.delivery.rows.length)
+                    addSheet(srcAoa(store.delivery.rows, [['mat','物料'],['qty','供應數量'],['date','交期']]), '達交交期在途');
             }
             XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
         }
