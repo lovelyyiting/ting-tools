@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>缺料模擬展出工具</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
     <style>
@@ -196,10 +197,11 @@
             woPrecision: load('woPrecision'),
             vendor: load('vendor'),
             delivery: load('delivery'),
-            masterRaw: load('masterRaw')
+            masterRaw: load('masterRaw'),
+            masterFile: load('masterFile')
         };
         function load(k){ return JSON.parse(localStorage.getItem('exp_'+k) || 'null') || { updatedAt:'', rows:[] }; }
-        function save(k){ localStorage.setItem('exp_'+k, JSON.stringify(store[k])); if(db) db.ref('toolbox/explode/'+k).set(store[k]); }
+        function save(k){ try { localStorage.setItem('exp_'+k, JSON.stringify(store[k])); } catch(e) {} if(db) db.ref('toolbox/explode/'+k).set(store[k]); }
 
         let result = { main: [], prec: [], none: [] };
         const OUT_COLS = ['訂單','項次','批次','溯源需求','物料','MRPCn','物料短文','工廠','需求日期','需求數量','承約數量','物料短缺','廠商','預計到齊','達交判定','在途分配'];
@@ -207,7 +209,7 @@
         function initData() {
             renderAllocStatus(); renderMasterStatus(); renderDeliveryStatus();
             if (db) {
-                ['allocation','woMain','woPrecision','vendor','delivery','masterRaw'].forEach(k => {
+                ['allocation','woMain','woPrecision','vendor','delivery','masterRaw','masterFile'].forEach(k => {
                     db.ref('toolbox/explode/'+k).on('value', snap => {
                         const v = snap.val();
                         if (v) {
@@ -291,11 +293,18 @@
         function readWorkbook(file, cb) {
             const reader = new FileReader();
             reader.onload = e => {
-                try { cb(null, XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false })); }
+                const u8 = new Uint8Array(e.target.result);
+                try { cb(null, XLSX.read(u8, { type: 'array', cellDates: false }), u8); }
                 catch (err) { cb(err); }
             };
             reader.onerror = () => cb(new Error('讀檔失敗'));
             reader.readAsArrayBuffer(file);
+        }
+
+        function u8ToB64(u8) {
+            let s = '';
+            for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode.apply(null, u8.subarray(i, i + 32768));
+            return btoa(s);
         }
 
         function importAllocation(file) {
@@ -315,7 +324,7 @@
 
         function importMaster(file) {
             if (!file) return;
-            readWorkbook(file, (err, wb) => {
+            readWorkbook(file, (err, wb, u8) => {
                 if (err) { alert('讀取失敗：' + err.message); return; }
                 const found = { woMain: null, woPrecision: null, vendor: null };
                 wb.SheetNames.forEach(n => {
@@ -336,9 +345,18 @@
                         report.push(`⚠️ 找不到「${label}」分頁`);
                     }
                 });
-                // 另存主檔全部分頁的原始內容（一模一樣），下載勾選附檔時直接照放
-                store.masterRaw = { updatedAt: now, sheets: wb.SheetNames.map(n => ({ name: n, aoa: sheetToAoa(wb, n) })) };
-                save('masterRaw');
+                // 存原始檔案本體（.xlsx＝zip 格式才行）：下載附檔時直接在原檔上加結果分頁，格式版面完全不動
+                const isZip = u8 && u8[0] === 0x50 && u8[1] === 0x4B;
+                if (isZip && u8.length < 7000000) {
+                    store.masterFile = { updatedAt: now, name: file.name, b64: u8ToB64(u8) };
+                    store.masterRaw = { updatedAt: '', sheets: [] }; // 有原檔就不必再存重建版
+                } else {
+                    // .xls 舊格式或檔案過大：存不了原檔，退回存分頁內容（格式會變純文字）
+                    store.masterFile = { updatedAt: '', name: '', b64: '' };
+                    store.masterRaw = { updatedAt: now, sheets: wb.SheetNames.map(n => ({ name: n, aoa: sheetToAoa(wb, n) })) };
+                    report.push(isZip ? '⚠️ 檔案太大，附檔時無法保留原格式（改附純文字內容）' : '⚠️ .xls 舊格式無法保留原樣式，另存成 .xlsx 再匯入即可保留');
+                }
+                save('masterFile'); save('masterRaw');
                 renderMasterStatus();
                 alert('主檔匯入完成：\n' + report.join('\n') +
                     '\n\n偵測到的分頁：' + wb.SheetNames.join('、'));
@@ -511,7 +529,7 @@
         function wipeAll() {
             if (!confirm('確定要一鍵刪除？\n\n會清空雲端與本機的：佔量結果、今日主檔、達交交期、展出結果。\n所有人開著的畫面都會同步清空，無法復原。')) return;
             if (!confirm('再確認一次：真的要刪除全部缺料模擬資料？')) return;
-            ['allocation','woMain','woPrecision','vendor','delivery','masterRaw'].forEach(k => {
+            ['allocation','woMain','woPrecision','vendor','delivery','masterRaw','masterFile'].forEach(k => {
                 store[k] = { updatedAt:'', rows: [] };
                 localStorage.removeItem('exp_'+k);
             });
@@ -588,7 +606,7 @@
             if (sumAoa.length > 1) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumAoa), '總彙整表');
             const add = (rows, name) => { if(rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([OUT_COLS].concat(rows.map(r=>OUT_COLS.map(c=>r[c])))), name); };
             add(result.main, '產線缺料'); add(result.prec, '精密缺料'); add(result.none, '未分類');
-            // 勾選時：把主檔A與達交交期放進同一個 Excel，各自獨立分頁（不影響原本下載）
+            // 勾選時：把主檔A與達交交期放進同一個 Excel（不影響原本下載）
             const chk = document.getElementById('attachSources');
             if (chk && chk.checked) {
                 // 分頁名稱處理：去掉 Excel 不允許的字元、限 31 字、避免重名
@@ -598,23 +616,77 @@
                     while (wb.SheetNames.includes(nm)) nm = base.slice(0, 28) + '_' + n++;
                     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), nm);
                 };
-                // 主檔A：附「當時匯入的原始分頁內容」，一模一樣照放
+                if (store.delivery.rows && store.delivery.rows.length)
+                    addSheet(srcAoa(store.delivery.rows, [['mat','物料'],['qty','供應數量'],['date','交期']]), '達交交期在途');
+                // 有存原檔：直接在主檔原檔上插入結果分頁，主檔分頁格式版面完全不動
+                if (store.masterFile && store.masterFile.b64) {
+                    mergeIntoMasterAndDownload(wb).catch(e => {
+                        alert('合併主檔原檔失敗：' + e.message + '\n改用一般下載（不含主檔分頁）');
+                        XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
+                    });
+                    return;
+                }
+                // 沒存原檔（舊資料或 .xls）：退回附重建版分頁
                 const mr = store.masterRaw;
                 if (mr && mr.sheets && mr.sheets.length) {
                     mr.sheets.forEach(s => { if (s.aoa && s.aoa.length) addSheet(s.aoa, '主檔A-' + s.name); });
-                } else {
-                    // 舊資料沒存原始內容：先附欄位擷取版，提醒重匯一次主檔
-                    alert('提醒：目前儲存的主檔是舊版格式，這次附的是欄位擷取版。\n重新匯入一次「今日主檔」後，下載就會附上跟原檔一模一樣的分頁內容。');
+                } else if (store.woMain.rows.length || store.woPrecision.rows.length || store.vendor.rows.length) {
+                    alert('提醒：目前儲存的主檔沒有原始檔可用，這次附的是欄位擷取版。\n重新匯入一次「今日主檔」(.xlsx)，下載就會保留原檔完整格式版面。');
                     const addSrc = (rows, cols, name) => { if (rows && rows.length) addSheet(srcAoa(rows, cols), name); };
                     const woCols = [['order','工單'],['item','項次'],['batch','批次'],['line','線別']];
                     addSrc(store.woMain.rows, woCols, '主檔A-成車工單');
                     addSrc(store.woPrecision.rows, woCols, '主檔A-精密工單');
                     addSrc(store.vendor.rows, [['mat','物料'],['vendor','廠商']], '主檔A-廠商對照');
                 }
-                if (store.delivery.rows && store.delivery.rows.length)
-                    addSheet(srcAoa(store.delivery.rows, [['mat','物料'],['qty','供應數量'],['date','交期']]), '達交交期在途');
             }
             XLSX.writeFile(wb, `缺料展出_${todayStr()}.xlsx`);
+        }
+
+        // 把結果分頁「插進」主檔原檔（zip 層級直接加分頁）：主檔原有分頁一個位元組都不動，
+        // 顏色、欄寬、合併儲存格、凍結窗格等全部保留；結果分頁插在最前面
+        async function mergeIntoMasterAndDownload(resultWb) {
+            const b64 = store.masterFile.b64;
+            const u8 = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+            const zip = await JSZip.loadAsync(u8);
+            if (!zip.file('xl/workbook.xml')) throw new Error('主檔原檔結構不支援');
+            const res = await JSZip.loadAsync(XLSX.write(resultWb, { type: 'array', bookType: 'xlsx' }));
+            let wbXml = await zip.file('xl/workbook.xml').async('string');
+            let rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+            let ct = await zip.file('[Content_Types].xml').async('string');
+            const escX = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            // 既有分頁名／編號，避免衝突
+            const usedNames = new Set(Array.from(wbXml.matchAll(/<sheet[^>]*name="([^"]*)"/g)).map(m => m[1]));
+            let maxRid = 0; rels.replace(/Id="rId(\d+)"/g, (m, n) => { maxRid = Math.max(maxRid, +n); return m; });
+            let maxSid = 0; wbXml.replace(/sheetId="(\d+)"/g, (m, n) => { maxSid = Math.max(maxSid, +n); return m; });
+            const names = resultWb.SheetNames;
+            // definedNames 的 localSheetId 是分頁順序索引，前面插入 n 頁要整體位移
+            wbXml = wbXml.replace(/localSheetId="(\d+)"/g, (m, k) => `localSheetId="${+k + names.length}"`);
+            wbXml = wbXml.replace(/activeTab="\d+"/g, 'activeTab="0"').replace(/firstSheet="\d+"/g, 'firstSheet="0"');
+            const xmls = await Promise.all(names.map((_, i) => res.file(`xl/worksheets/sheet${i + 1}.xml`).async('string')));
+            let sheetTags = '', relTags = '', ctTags = '';
+            names.forEach((name, i) => {
+                let nm = name; let c = 2;
+                while (usedNames.has(nm)) nm = name.slice(0, 28) + '_' + c++;
+                usedNames.add(nm);
+                const f = `rsheet${i + 1}.xml`, rid = 'rId' + (maxRid + i + 1);
+                zip.file('xl/worksheets/' + f, xmls[i]);
+                sheetTags += `<sheet name="${escX(nm)}" sheetId="${maxSid + i + 1}" r:id="${rid}"/>`;
+                relTags += `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/${f}"/>`;
+                ctTags += `<Override PartName="/xl/worksheets/${f}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+            });
+            wbXml = wbXml.replace(/(<sheets[^>]*>)/, '$1' + sheetTags);
+            rels = rels.replace('</Relationships>', relTags + '</Relationships>');
+            ct = ct.replace('</Types>', ctTags + '</Types>');
+            zip.file('xl/workbook.xml', wbXml);
+            zip.file('xl/_rels/workbook.xml.rels', rels);
+            zip.file('[Content_Types].xml', ct);
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE',
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `缺料展出_${todayStr()}.xlsx`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         }
 
         initData();
