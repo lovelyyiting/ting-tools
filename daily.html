@@ -222,7 +222,7 @@
         const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
         const WEEK = ['日','一','二','三','四','五','六'];
 
-        const REASONS = ['缺料', '人力不足', '品質異常/重工', '設變', '機台故障', '客戶變更', '前製程未交', '其他'];
+        const REASONS = ['缺料', '人力不足', '品質異常/重工', '下線整修', '設變', '機台故障', '客戶變更', '前製程未交', '落後', '其他'];
 
         function blankRec(date) {
             return { date, author: '', summary: '', risk: '', ship: { due: '', done: '', late: '', note: '' }, lines: {}, lags: [], snap: null, updatedAt: '' };
