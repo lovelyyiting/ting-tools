@@ -64,6 +64,14 @@
         .sub { font-size: 11.5px; color: #999; }
         .del-btn { border: none; background: none; color: #c0392b; cursor: pointer; font-size: 15px; padding: 2px 6px; }
 
+        .lagsum { margin-top: 14px; border: 1px solid #ece3cf; border-radius: 10px; padding: 12px 14px; background: #fffdf8; }
+        .lagsum .ls-title { font-size: 12.5px; color: #8f8778; margin-bottom: 8px; }
+        table.lstab { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table.lstab td { padding: 5px 8px; border-bottom: 1px solid #f2ece0; }
+        table.lstab tr.ls-tot td { border-bottom: none; border-top: 1px solid #e4dccb; font-weight: bold; color: #55503f; }
+        table.lstab td.num { text-align: right; white-space: nowrap; }
+        table.lstab td:first-child { min-width: 7em; }
+
         .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
         .field label { display: block; font-size: 12.5px; color: #8f8778; margin-bottom: 5px; }
         .field input, .field textarea, .field select {
@@ -135,7 +143,8 @@
         <!-- ③ 落後與異常 -->
         <div class="section">
             <h3>③ 落後與異常項目 <span class="fill-tag">最重要：原因、負責人、補回日</span></h3>
-            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。</div>
+            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。<br>
+                <b>殘留天數</b>＝開始生產日到記錄日已經過幾天（日曆天）；從 Frozen 帶入時，<b>開始生產日</b>抓該批最早排程日、<b>落後進度(小時)</b>用料號工時換算，都可以自己改。</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                 <button class="export-btn" onclick="drPullLag()">⬇️ 從 Frozen 帶入落後批次（前 8 名）</button>
                 <button class="export-btn" onclick="drAddLag()">＋ 手動新增一列</button>
@@ -143,6 +152,7 @@
             <div class="table-wrap">
                 <table class="data" id="drLagTable"></table>
             </div>
+            <div id="drLagSum"></div>
         </div>
 
         <!-- ④ 出貨／交期 -->
@@ -389,20 +399,45 @@
         }
 
         // ===== ③ 落後與異常 =====
+        // 殘留天數＝開始生產日 → 記錄日，這批尾數已經卡了幾天（日曆天）
+        function drStay(start, base) {
+            if (!start || !base) return null;
+            return Math.round((new Date(base + 'T00:00:00') - new Date(start + 'T00:00:00')) / 864e5);
+        }
+        const drStayText = d => d == null ? '—' : (d < 0 ? '未開始' : d + ' 天');
+        // 依線別彙整：總落後時數、落後台數、項數、最久殘留天數
+        function drLagByLine() {
+            const byLine = {};
+            let qty = 0, hr = 0, n = 0;
+            (drRec.lags || []).forEach(r => {
+                if (!r.line && !r.batch && !r.part && !num(r.behind) && !num(r.hr)) return;
+                const k = r.line || '（未指定產線）';
+                if (!byLine[k]) byLine[k] = { qty: 0, hr: 0, n: 0, maxStay: null };
+                const q = num(r.behind), h = num(r.hr);
+                byLine[k].qty += q; byLine[k].hr += h; byLine[k].n++;
+                qty += q; hr += h; n++;
+                const st = drStay(r.start, drRec.date);
+                if (st != null && st >= 0) byLine[k].maxStay = Math.max(byLine[k].maxStay ?? 0, st);
+            });
+            return { byLine, qty, hr, n };
+        }
         function drRenderLags() {
             const t = document.getElementById('drLagTable');
             const rows = drRec.lags || [];
-            let html = '<tr><th style="width:34px;"></th><th>產線</th><th>批次</th><th>料號 / 車種</th><th class="num">落後(台)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th></tr>';
+            let html = '<tr><th style="width:34px;"></th><th>開始生產日</th><th>產線</th><th>批次</th><th>料號 / 車種</th><th class="num">落後(台)</th><th class="num">殘留天數</th><th class="num">落後進度(小時)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th><th>出貨日</th></tr>';
             if (!rows.length) {
-                html += '<tr><td colspan="9" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「從 Frozen 帶入」或「手動新增一列」。</td></tr>';
+                html += '<tr><td colspan="13" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「從 Frozen 帶入」或「手動新增一列」。</td></tr>';
             }
             rows.forEach((r, i) => {
                 html += `<tr>
                     <td><button class="del-btn" onclick="drDelLag(${i})" title="刪除這列">✕</button></td>
-                    <td><input type="text" data-path="lags.${i}.line" value="${esc(r.line || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="date" data-path="lags.${i}.start" value="${esc(r.start || '')}" oninput="drEdit(this, true)"></td>
+                    <td><input type="text" data-path="lags.${i}.line" value="${esc(r.line || '')}" oninput="drEdit(this, true)"></td>
                     <td><input type="text" data-path="lags.${i}.batch" value="${esc(r.batch || '')}" oninput="drEdit(this)"></td>
                     <td><input type="text" data-path="lags.${i}.part" value="${esc(r.part || '')}" oninput="drEdit(this)"></td>
-                    <td class="num"><input class="mini" type="text" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="drEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" inputmode="numeric" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="drEdit(this, true)"></td>
+                    <td class="num"><span class="sub" data-stay="${i}">${drStayText(drStay(r.start, drRec.date))}</span></td>
+                    <td class="num"><input class="mini" type="text" inputmode="decimal" data-path="lags.${i}.hr" value="${esc(r.hr || '')}" oninput="drEdit(this, true)"></td>
                     <td><select data-path="lags.${i}.reason" onchange="drEdit(this)">
                         <option value="">— 選原因 —</option>
                         ${REASONS.map(x => `<option value="${x}"${r.reason === x ? ' selected' : ''}>${x}</option>`).join('')}
@@ -410,13 +445,48 @@
                     <td><input type="text" data-path="lags.${i}.owner" value="${esc(r.owner || '')}" oninput="drEdit(this)"></td>
                     <td><input type="date" data-path="lags.${i}.eta" value="${esc(r.eta || '')}" oninput="drEdit(this)"></td>
                     <td><input type="text" data-path="lags.${i}.action" value="${esc(r.action || '')}" oninput="drEdit(this)" placeholder="怎麼補回來"></td>
+                    <td><input type="date" data-path="lags.${i}.ship" value="${esc(r.ship || '')}" oninput="drEdit(this)"></td>
                 </tr>`;
             });
+            if (rows.length) {
+                html += `<tr style="background:#f7f5ee;font-weight:bold;">
+                    <td></td><td colspan="4">合計</td>
+                    <td class="num" data-lagtot="qty">0</td><td></td>
+                    <td class="num" data-lagtot="hr">0</td><td colspan="5"></td></tr>`;
+            }
             t.innerHTML = html;
+            drLagCalc();
+        }
+        // 只更新殘留天數、合計與線別彙整（不重畫輸入框）
+        function drLagCalc() {
+            (drRec.lags || []).forEach((r, i) => {
+                const el = document.querySelector(`[data-stay="${i}"]`);
+                if (el) el.textContent = drStayText(drStay(r.start, drRec.date));
+            });
+            const g = drLagByLine();
+            const fq = document.querySelector('[data-lagtot="qty"]'), fh = document.querySelector('[data-lagtot="hr"]');
+            if (fq) fq.textContent = fmtN(Math.round(g.qty));
+            if (fh) fh.textContent = r1(g.hr);
+            const box = document.getElementById('drLagSum');
+            const keys = Object.keys(g.byLine);
+            if (!keys.length) { box.innerHTML = ''; return; }
+            box.innerHTML = `<div class="lagsum">
+                <div class="ls-title">⏱ 依線別彙整總落後時間（截至 ${esc(drRec.date)}）</div>
+                <table class="lstab">
+                ${keys.map(k => `<tr><td>${esc(k)}</td><td class="num sub">${g.byLine[k].n} 項</td>
+                    <td class="num">落後 ${fmtN(Math.round(g.byLine[k].qty))} 台</td>
+                    <td class="num" style="color:#c0392b;"><b>${r1(g.byLine[k].hr)} 小時</b></td>
+                    <td class="num sub">最久殘留 ${g.byLine[k].maxStay == null ? '—' : g.byLine[k].maxStay + ' 天'}</td></tr>`).join('')}
+                <tr class="ls-tot"><td>全廠合計</td><td class="num">${g.n} 項</td>
+                    <td class="num">落後 ${fmtN(Math.round(g.qty))} 台</td>
+                    <td class="num" style="color:#c0392b;">${r1(g.hr)} 小時</td><td></td></tr>
+                </table>
+                <div class="sub" style="margin-top:8px;line-height:1.7;">每條線通常只有一種工時基準，線別小計可直接看；全廠合計把「整線時間」與「1 人工時」加在一起，只當概覽用。</div>
+                </div>`;
         }
         function drAddLag() {
             drRec.lags = drRec.lags || [];
-            drRec.lags.push({ line: '', batch: '', part: '', behind: '', reason: '', owner: '', eta: '', action: '' });
+            drRec.lags.push({ start: '', line: '', batch: '', part: '', behind: '', hr: '', reason: '', owner: '', eta: '', action: '', ship: '' });
             drRenderLags(); drSave();
         }
         function drDelLag(i) {
@@ -433,19 +503,23 @@
                 (line.rows || []).forEach(r => {
                     if (!r.date || r.date > base) return;
                     const k = san(r.batch + '|' + r.part);
-                    if (!agg[k]) agg[k] = { row: r, due: 0, done: 0 };
+                    if (!agg[k]) agg[k] = { row: r, due: 0, done: 0, first: r.date };
                     agg[k].due += num(r.plan);
+                    if (r.date < agg[k].first) agg[k].first = r.date;      // 該批最早排程日＝開始生產日
                 });
                 Object.entries(fzDone[san(line.name)] || {}).forEach(([k, rec]) => {
                     Object.entries(rec || {}).forEach(([d, q]) => {
                         if (d > base) return;
-                        if (!agg[k]) { const r = idx[k]; if (!r) return; agg[k] = { row: r, due: 0, done: 0 }; }
+                        if (!agg[k]) { const r = idx[k]; if (!r) return; agg[k] = { row: r, due: 0, done: 0, first: r.date }; }
                         agg[k].done += num(q);
                     });
                 });
                 Object.values(agg).forEach(a => {
                     const behind = a.due - a.done;
-                    if (behind > 0.5) list.push({ line: line.name, row: a.row, behind: Math.round(behind) });
+                    if (behind <= 0.5) return;
+                    // 落後時數＝落後台數 × 該料號工時（與 Frozen 看板同一套換算）
+                    const h = wtQtyToHr(drWt(a.row, base), behind);
+                    list.push({ line: line.name, row: a.row, behind: Math.round(behind), first: a.first || '', hr: h.hr != null ? r1(h.hr) : '' });
                 });
             });
             list.sort((a, b) => b.behind - a.behind);
@@ -458,13 +532,14 @@
                 const key = x.row.batch + '|' + x.row.part;
                 if (has.has(key)) return;                       // 已經在表上就不重複帶（保留你填的原因）
                 drRec.lags.push({
-                    line: x.line, batch: x.row.batch, part: x.row.part + (x.row.desc ? '／' + x.row.desc : ''),
-                    behind: String(x.behind), reason: '', owner: '', eta: '', action: ''
+                    start: x.first, line: x.line, batch: x.row.batch, part: x.row.part + (x.row.desc ? '／' + x.row.desc : ''),
+                    behind: String(x.behind), hr: x.hr === '' ? '' : String(x.hr),
+                    reason: '', owner: '', eta: '', action: '', ship: ''
                 });
                 added++;
             });
             drRenderLags(); drSave();
-            alert(added ? `帶入 ${added} 筆落後批次，請補「原因／負責人／預計補回日」。` : '落後批次都已經在表上了。');
+            alert(added ? `帶入 ${added} 筆落後批次（開始生產日與落後時數已自動帶出），請補「原因／負責人／預計補回日」。` : '落後批次都已經在表上了。');
         }
 
         // ===== 編輯與儲存 =====
@@ -478,8 +553,9 @@
             }
             o[ks[ks.length - 1]] = val;
         }
-        function drEdit(el) {
+        function drEdit(el, lagcalc) {
             setPath(drRec, el.dataset.path, el.value);
+            if (lagcalc) drLagCalc();
             drMark('dirty');
             clearTimeout(drTimer);
             drTimer = setTimeout(drSave, 1000);
@@ -610,12 +686,19 @@
             } else {
                 L.push('【本月累計】尚無 Frozen 排程資料');
             }
-            const lags = (drRec.lags || []).filter(r => r.batch || r.part || r.action);
+            const lags = (drRec.lags || []).filter(r => r.batch || r.part || r.action || num(r.behind) || num(r.hr));
             L.push('');
             if (lags.length) {
                 L.push('【落後與異常】');
                 lags.forEach((r, i) => {
-                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${r.behind ? '　落後 ' + r.behind + ' 台' : ''}`);
+                    const qh = [];
+                    if (num(r.behind)) qh.push('落後 ' + r.behind + ' 台');
+                    if (num(r.hr)) qh.push(r.hr + ' 小時');
+                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${qh.length ? '　' + qh.join('・') : ''}`);
+                    const l2 = [];
+                    if (r.start) { const st = drStay(r.start, base); l2.push('開始生產 ' + r.start + (st == null ? '' : st < 0 ? '（尚未開始）' : '（殘留 ' + st + ' 天）')); }
+                    if (r.ship) l2.push('出貨日 ' + r.ship);
+                    if (l2.length) L.push('　　' + l2.join('｜'));
                     const seg = [];
                     if (r.reason) seg.push('原因：' + r.reason);
                     if (r.owner) seg.push('負責人：' + r.owner);
@@ -623,6 +706,16 @@
                     if (seg.length) L.push('　　' + seg.join('｜'));
                     if (r.action) L.push('　　對策：' + r.action);
                 });
+                const g = drLagByLine();
+                if (g.n) {
+                    L.push('');
+                    L.push('【各線總落後時間】');
+                    Object.keys(g.byLine).forEach(k => {
+                        const b = g.byLine[k];
+                        L.push(`・${k}：${r1(b.hr)} 小時（${b.n} 項・落後 ${fmtN(Math.round(b.qty))} 台${b.maxStay != null ? '・最久殘留 ' + b.maxStay + ' 天' : ''}）`);
+                    });
+                    L.push(`・全廠合計：${r1(g.hr)} 小時／落後 ${fmtN(Math.round(g.qty))} 台`);
+                }
             } else {
                 L.push('【落後與異常】無 ✅');
             }
@@ -701,13 +794,27 @@
                 const keys = Object.keys(v).sort();
                 if (!keys.length) { alert('沒有可匯出的記錄'); return; }
                 const a1 = [['日期', '月應完成', '月已完成', '月達成率%', '全月計劃', '月底預估', '當日計劃', '當日實際', '當日達成率%', '應出貨', '實出貨', '累計遲交', '落後項數', '結論', '填表人', '更新時間']];
-                const a2 = [['日期', '產線', '批次', '料號/車種', '落後(台)', '原因', '負責人', '預計補回日', '對策']];
+                const a2 = [['日期', '產線', '開始生產日', '殘留天數', '批次', '料號/車種', '落後(台)', '落後進度(小時)', '原因', '負責人', '預計補回日', '出貨日', '對策']];
+                const a4 = [['日期', '產線', '落後項數', '落後(台)', '總落後時間(小時)', '最久殘留天數']];
                 const a3 = [['日期', '產線', '計劃(台)', '實際(台)', '達成率%', '出勤人力', '加班(h)', '停線(h)', '異常說明']];
                 keys.forEach(k => {
                     const r = v[k], sn = r.snap || {}, m = sn.month || {}, dy = sn.day || {}, sp = r.ship || {};
                     a1.push([k, m.due ?? '', m.done ?? '', m.pct ?? '', m.planAll ?? '', m.est ?? '', dy.due ?? '', dy.done ?? '', dy.pct ?? '',
                              sp.due || '', sp.done || '', sp.late || '', (r.lags || []).length, r.summary || '', r.author || '', r.updatedAt || '']);
-                    (r.lags || []).forEach(g => a2.push([k, g.line || '', g.batch || '', g.part || '', g.behind || '', g.reason || '', g.owner || '', g.eta || '', g.action || '']));
+                    (r.lags || []).forEach(g => {
+                        const st = drStay(g.start, k);
+                        a2.push([k, g.line || '', g.start || '', st == null ? '' : st, g.batch || '', g.part || '', num(g.behind) || '', num(g.hr) || '',
+                                 g.reason || '', g.owner || '', g.eta || '', g.ship || '', g.action || '']);
+                    });
+                    const byLine = {};
+                    (r.lags || []).forEach(g => {
+                        const key = g.line || '（未指定產線）';
+                        if (!byLine[key]) byLine[key] = { qty: 0, hr: 0, n: 0, maxStay: null };
+                        byLine[key].qty += num(g.behind); byLine[key].hr += num(g.hr); byLine[key].n++;
+                        const st = drStay(g.start, k);
+                        if (st != null && st >= 0) byLine[key].maxStay = Math.max(byLine[key].maxStay ?? 0, st);
+                    });
+                    Object.entries(byLine).forEach(([name, b]) => a4.push([k, name, b.n, Math.round(b.qty), r1(b.hr), b.maxStay ?? '']));
                     (sn.lines || []).forEach(l => {
                         const f = (r.lines || {})[san(l.name)] || {};
                         a3.push([k, l.name, l.due, l.done, l.pct ?? '', f.people || '', f.ot || '', f.stop || '', f.note || '']);
@@ -717,6 +824,7 @@
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), '日報彙總');
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), '落後明細');
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), '產線明細');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a4), '落後時數彙整');
                 XLSX.writeFile(wb, `生管每日記錄_${todayStr()}.xlsx`);
             }).catch(e => alert('匯出失敗：' + e.message));
         }

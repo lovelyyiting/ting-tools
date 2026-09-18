@@ -75,6 +75,14 @@
         .sub { font-size: 11.5px; color: #999; }
         .del-btn { border: none; background: none; color: #c0392b; cursor: pointer; font-size: 15px; padding: 2px 6px; }
 
+        .lagsum { margin-top: 14px; border: 1px solid #ece3cf; border-radius: 10px; padding: 12px 14px; background: #fffdf8; }
+        .lagsum .ls-title { font-size: 12.5px; color: #8f8778; margin-bottom: 8px; }
+        table.lstab { width: 100%; border-collapse: collapse; font-size: 13px; }
+        table.lstab td { padding: 5px 8px; border-bottom: 1px solid #f2ece0; }
+        table.lstab tr.ls-tot td { border-bottom: none; border-top: 1px solid #e4dccb; font-weight: bold; color: #55503f; }
+        table.lstab td.num { text-align: right; white-space: nowrap; }
+        table.lstab td:first-child { min-width: 7em; }
+
         .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
         .field label { display: block; font-size: 12.5px; color: #8f8778; margin-bottom: 5px; }
         .field input, .field textarea, .field select {
@@ -155,13 +163,15 @@
         <!-- ③ 落後與異常 -->
         <div class="section">
             <h3>③ 落後與異常項目 <span class="fill-tag">最重要：原因、負責人、補回日</span></h3>
-            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。</div>
+            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。<br>
+                <b>殘留天數</b>＝開始生產日到記錄日已經過幾天（日曆天，自動算）；<b>落後進度(小時)</b>自己填，下面會依線別加總成「總落後時間」。</div>
             <div style="margin-bottom:10px;">
                 <button class="export-btn" onclick="dmAddLag()">＋ 新增一列</button>
             </div>
             <div class="table-wrap">
                 <table class="data" id="dmLagTable"></table>
             </div>
+            <div id="dmLagSum"></div>
         </div>
 
         <!-- ④ 出貨 -->
@@ -412,21 +422,46 @@
         }
 
         // ===== ③ 落後與異常 =====
+        // 殘留天數＝開始生產日 → 記錄日，這批尾數已經卡了幾天（日曆天）
+        function dmStay(start, base) {
+            if (!start || !base) return null;
+            return Math.round((new Date(base + 'T00:00:00') - new Date(start + 'T00:00:00')) / 864e5);
+        }
+        const dmStayText = d => d == null ? '—' : (d < 0 ? '未開始' : d + ' 天');
+        // 依線別彙整：總落後時數、落後台數、項數、最久殘留天數
+        function dmLagByLine() {
+            const byLine = {};
+            let qty = 0, hr = 0, n = 0;
+            (dmRec.lags || []).forEach(r => {
+                if (!r.line && !r.batch && !r.part && !num(r.behind) && !num(r.hr)) return;
+                const k = r.line || '（未指定產線）';
+                if (!byLine[k]) byLine[k] = { qty: 0, hr: 0, n: 0, maxStay: null };
+                const q = num(r.behind), h = num(r.hr);
+                byLine[k].qty += q; byLine[k].hr += h; byLine[k].n++;
+                qty += q; hr += h; n++;
+                const st = dmStay(r.start, dmRec.date);
+                if (st != null && st >= 0) byLine[k].maxStay = Math.max(byLine[k].maxStay ?? 0, st);
+            });
+            return { byLine, qty, hr, n };
+        }
         function dmRenderLags() {
             const t = document.getElementById('dmLagTable');
             const rows = dmRec.lags || [];
-            let html = '<tr><th style="width:34px;"></th><th>產線</th><th>批次 / 工單</th><th>料號 / 車種</th><th class="num">落後(台)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th></tr>';
-            if (!rows.length) html += '<tr><td colspan="9" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「＋ 新增一列」。</td></tr>';
+            let html = '<tr><th style="width:34px;"></th><th>開始生產日</th><th>產線</th><th>批次 / 工單</th><th>料號 / 車種</th><th class="num">落後(台)</th><th class="num">殘留天數</th><th class="num">落後進度(小時)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th><th>出貨日</th></tr>';
+            if (!rows.length) html += '<tr><td colspan="13" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「＋ 新增一列」。</td></tr>';
             rows.forEach((r, i) => {
                 html += `<tr>
                     <td><button class="del-btn" onclick="dmDelLag(${i})" title="刪除這列">✕</button></td>
-                    <td><select data-path="lags.${i}.line" onchange="dmEdit(this)">
+                    <td><input type="date" data-path="lags.${i}.start" value="${esc(r.start || '')}" oninput="dmEdit(this, false, true)"></td>
+                    <td><select data-path="lags.${i}.line" onchange="dmEdit(this, false, true)">
                         <option value="">—</option>
                         ${(dmCfg.lines || []).map(n => `<option value="${esc(n)}"${r.line === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}
                     </select></td>
                     <td><input type="text" data-path="lags.${i}.batch" value="${esc(r.batch || '')}" oninput="dmEdit(this)"></td>
                     <td><input type="text" data-path="lags.${i}.part" value="${esc(r.part || '')}" oninput="dmEdit(this)"></td>
-                    <td class="num"><input class="mini" type="text" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="dmEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" inputmode="numeric" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="dmEdit(this, false, true)"></td>
+                    <td class="num"><span class="sub" data-stay="${i}">${dmStayText(dmStay(r.start, dmRec.date))}</span></td>
+                    <td class="num"><input class="mini" type="text" inputmode="decimal" data-path="lags.${i}.hr" value="${esc(r.hr || '')}" oninput="dmEdit(this, false, true)"></td>
                     <td><select data-path="lags.${i}.reason" onchange="dmEdit(this)">
                         <option value="">— 選原因 —</option>
                         ${REASONS.map(x => `<option value="${x}"${r.reason === x ? ' selected' : ''}>${x}</option>`).join('')}
@@ -434,13 +469,46 @@
                     <td><input type="text" data-path="lags.${i}.owner" value="${esc(r.owner || '')}" oninput="dmEdit(this)"></td>
                     <td><input type="date" data-path="lags.${i}.eta" value="${esc(r.eta || '')}" oninput="dmEdit(this)"></td>
                     <td><input type="text" data-path="lags.${i}.action" value="${esc(r.action || '')}" oninput="dmEdit(this)" placeholder="怎麼補回來"></td>
+                    <td><input type="date" data-path="lags.${i}.ship" value="${esc(r.ship || '')}" oninput="dmEdit(this)"></td>
                 </tr>`;
             });
+            if (rows.length) {
+                html += `<tr style="background:#f7f5ee;font-weight:bold;">
+                    <td></td><td colspan="4">合計</td>
+                    <td class="num" data-lagtot="qty">0</td><td></td>
+                    <td class="num" data-lagtot="hr">0</td><td colspan="5"></td></tr>`;
+            }
             t.innerHTML = html;
+            dmLagCalc();
+        }
+        // 只更新殘留天數、合計與線別彙整（不重畫輸入框）
+        function dmLagCalc() {
+            (dmRec.lags || []).forEach((r, i) => {
+                const el = document.querySelector(`[data-stay="${i}"]`);
+                if (el) el.textContent = dmStayText(dmStay(r.start, dmRec.date));
+            });
+            const g = dmLagByLine();
+            const fq = document.querySelector('[data-lagtot="qty"]'), fh = document.querySelector('[data-lagtot="hr"]');
+            if (fq) fq.textContent = fmtN(Math.round(g.qty));
+            if (fh) fh.textContent = r1(g.hr);
+            const box = document.getElementById('dmLagSum');
+            const keys = Object.keys(g.byLine);
+            if (!keys.length) { box.innerHTML = ''; return; }
+            box.innerHTML = `<div class="lagsum">
+                <div class="ls-title">⏱ 依線別彙整總落後時間（截至 ${esc(dmRec.date)}）</div>
+                <table class="lstab">
+                ${keys.map(k => `<tr><td>${esc(k)}</td><td class="num sub">${g.byLine[k].n} 項</td>
+                    <td class="num">落後 ${fmtN(Math.round(g.byLine[k].qty))} 台</td>
+                    <td class="num" style="color:#c0392b;"><b>${r1(g.byLine[k].hr)} 小時</b></td>
+                    <td class="num sub">最久殘留 ${g.byLine[k].maxStay == null ? '—' : g.byLine[k].maxStay + ' 天'}</td></tr>`).join('')}
+                <tr class="ls-tot"><td>全廠合計</td><td class="num">${g.n} 項</td>
+                    <td class="num">落後 ${fmtN(Math.round(g.qty))} 台</td>
+                    <td class="num" style="color:#c0392b;">${r1(g.hr)} 小時</td><td></td></tr>
+                </table></div>`;
         }
         function dmAddLag() {
             dmRec.lags = dmRec.lags || [];
-            dmRec.lags.push({ line: '', batch: '', part: '', behind: '', reason: '', owner: '', eta: '', action: '' });
+            dmRec.lags.push({ start: '', line: '', batch: '', part: '', behind: '', hr: '', reason: '', owner: '', eta: '', action: '', ship: '' });
             dmRenderLags(); dmSave();
         }
         function dmDelLag(i) { dmRec.lags.splice(i, 1); dmRenderLags(); dmSave(); }
@@ -527,9 +595,10 @@
             }
             o[ks[ks.length - 1]] = val;
         }
-        function dmEdit(el, recalc) {
+        function dmEdit(el, recalc, lagcalc) {
             setPath(dmRec, el.dataset.path, el.value);
             if (recalc) dmRefreshCalc();
+            if (lagcalc) dmLagCalc();
             dmMark('dirty');
             clearTimeout(dmTimer);
             dmTimer = setTimeout(dmSave, 1000);
@@ -633,12 +702,19 @@
                 L.push(`・${name}：計劃 ${fmtN(num(v.plan))}／實際 ${fmtN(num(v.act))}（${p == null ? '—' : p + '%'}）${ex.length ? '　' + ex.join('・') : ''}${v.note ? '\n　　' + v.note : ''}`);
             });
             L.push(`　全廠合計：計劃 ${fmtN(Math.round(tot.plan))}／實際 ${fmtN(Math.round(tot.act))}（${tot.pct == null ? '—' : tot.pct + '%'}）`);
-            const lags = (dmRec.lags || []).filter(r => r.batch || r.part || r.action || r.reason);
+            const lags = (dmRec.lags || []).filter(r => r.batch || r.part || r.action || r.reason || num(r.behind) || num(r.hr));
             L.push('');
             if (lags.length) {
                 L.push('【落後與異常】');
                 lags.forEach((r, i) => {
-                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${r.behind ? '　落後 ' + r.behind + ' 台' : ''}`);
+                    const qh = [];
+                    if (num(r.behind)) qh.push('落後 ' + r.behind + ' 台');
+                    if (num(r.hr)) qh.push(r.hr + ' 小時');
+                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${qh.length ? '　' + qh.join('・') : ''}`);
+                    const l2 = [];
+                    if (r.start) { const st = dmStay(r.start, base); l2.push('開始生產 ' + r.start + (st == null ? '' : st < 0 ? '（尚未開始）' : '（殘留 ' + st + ' 天）')); }
+                    if (r.ship) l2.push('出貨日 ' + r.ship);
+                    if (l2.length) L.push('　　' + l2.join('｜'));
                     const seg = [];
                     if (r.reason) seg.push('原因：' + r.reason);
                     if (r.owner) seg.push('負責人：' + r.owner);
@@ -646,6 +722,16 @@
                     if (seg.length) L.push('　　' + seg.join('｜'));
                     if (r.action) L.push('　　對策：' + r.action);
                 });
+                const g = dmLagByLine();
+                if (g.n) {
+                    L.push('');
+                    L.push('【各線總落後時間】');
+                    Object.keys(g.byLine).forEach(k => {
+                        const b = g.byLine[k];
+                        L.push(`・${k}：${r1(b.hr)} 小時（${b.n} 項・落後 ${fmtN(Math.round(b.qty))} 台${b.maxStay != null ? '・最久殘留 ' + b.maxStay + ' 天' : ''}）`);
+                    });
+                    L.push(`・全廠合計：${r1(g.hr)} 小時／落後 ${fmtN(Math.round(g.qty))} 台`);
+                }
             } else L.push('【落後與異常】無 ✅');
             const sp = dmRec.ship || {};
             if (sp.due || sp.done || sp.late || sp.note) {
@@ -708,14 +794,29 @@
             const keys = Object.keys(dmRecs).filter(d => dmRecs[d]).sort();
             if (!keys.length) { alert('沒有可匯出的記錄'); return; }
             const a1 = [['日期', '星期', '當日計劃', '當日實際', '當日達成率%', '月累計計劃', '月累計實際', '月進度達成率%', '本月計劃量', '月目標完成度%', '應出貨', '實出貨', '累計遲交', '落後項數', '結論', '填表人']];
-            const a2 = [['日期', '產線', '批次/工單', '料號/車種', '落後(台)', '原因', '負責人', '預計補回日', '對策']];
+            const a2 = [['日期', '產線', '開始生產日', '殘留天數', '批次/工單', '料號/車種', '落後(台)', '落後進度(小時)', '原因', '負責人', '預計補回日', '出貨日', '對策']];
+            const a4 = [['日期', '產線', '落後項數', '落後(台)', '總落後時間(小時)', '最久殘留天數']];
             const a3 = [['日期', '產線', '計劃(台)', '實際(台)', '達成率%', '出勤人力', '加班(h)', '停線(h)', '異常說明']];
             keys.forEach(k => {
                 const r = dmRecs[k], t = dmDayTotal(r), ms = dmMonthStat(k), sp = r.ship || {};
                 const w = WEEK[new Date(k + 'T00:00:00').getDay()];
                 a1.push([k, w, Math.round(t.plan), Math.round(t.act), t.pct ?? '', Math.round(ms.plan), Math.round(ms.act), ms.pct ?? '',
                          ms.target || '', ms.targetPct ?? '', sp.due || '', sp.done || '', sp.late || '', (r.lags || []).length, r.summary || '', r.author || '']);
-                (r.lags || []).forEach(g => a2.push([k, g.line || '', g.batch || '', g.part || '', g.behind || '', g.reason || '', g.owner || '', g.eta || '', g.action || '']));
+                (r.lags || []).forEach(g => {
+                    const st = dmStay(g.start, k);
+                    a2.push([k, g.line || '', g.start || '', st == null ? '' : st, g.batch || '', g.part || '', num(g.behind) || '', num(g.hr) || '',
+                             g.reason || '', g.owner || '', g.eta || '', g.ship || '', g.action || '']);
+                });
+                // 依線別彙整（用該天的記錄重算，不動目前畫面）
+                const byLine = {};
+                (r.lags || []).forEach(g => {
+                    const key = g.line || '（未指定產線）';
+                    if (!byLine[key]) byLine[key] = { qty: 0, hr: 0, n: 0, maxStay: null };
+                    byLine[key].qty += num(g.behind); byLine[key].hr += num(g.hr); byLine[key].n++;
+                    const st = dmStay(g.start, k);
+                    if (st != null && st >= 0) byLine[key].maxStay = Math.max(byLine[key].maxStay ?? 0, st);
+                });
+                Object.entries(byLine).forEach(([name, b]) => a4.push([k, name, b.n, Math.round(b.qty), r1(b.hr), b.maxStay ?? '']));
                 Object.values(r.lines || {}).forEach(v => {
                     if ((v.plan === '' || v.plan == null) && (v.act === '' || v.act == null) && !v.note) return;
                     a3.push([k, v.name || '', num(v.plan), num(v.act), dmPct(num(v.act), num(v.plan)) ?? '', v.people || '', v.ot || '', v.stop || '', v.note || '']);
@@ -725,6 +826,7 @@
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), '日報彙總');
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), '落後明細');
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), '產線明細');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a4), '落後時數彙整');
             XLSX.writeFile(wb, `生管每日記錄_${todayStr()}.xlsx`);
         }
 
