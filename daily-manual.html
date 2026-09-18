@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生管每日記錄（手動輸入）</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; padding: 20px; text-align: center; position: relative; }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: white; text-decoration: none; font-size: 14px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #eee; align-items: center; font-size: 14px; }
+        .toolbar label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .toolbar input[type=date] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .quick { border: 1px solid #ccc; background: white; padding: 7px 12px; border-radius: 16px; font-size: 13.5px; cursor: pointer; color: #555; }
+        .imp-btn { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .export-btn { border: 1px solid #ccc; background: white; padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+        .saveState { font-size: 12.5px; color: #999; margin-left: auto; white-space: nowrap; }
+        .saveState.dirty { color: #c0392b; }
+        .saveState.ok { color: #2e7d32; }
+
+        .section { padding: 16px 20px; border-bottom: 8px solid #efe9dc; }
+        .section h3 { font-size: 16px; color: #55503f; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .section .hint { font-size: 12px; color: #999; margin-bottom: 12px; line-height: 1.6; }
+        .auto-tag { font-size: 11px; background: #eef2e6; color: #6e7a58; border-radius: 10px; padding: 2px 8px; font-weight: normal; }
+        .fill-tag { font-size: 11px; background: #fdf0e3; color: #a9713a; border-radius: 10px; padding: 2px 8px; font-weight: normal; }
+
+        .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .kpi { background: #f7f5ee; border: 1px solid #ece3cf; border-radius: 10px; padding: 12px 14px; }
+        .kpi .k { font-size: 12px; color: #8f8778; margin-bottom: 6px; }
+        .kpi .v { font-size: 22px; color: #55503f; font-weight: bold; }
+        .kpi .s { font-size: 11.5px; color: #999; margin-top: 4px; line-height: 1.5; }
+        .kpi.good .v { color: #2e7d32; }
+        .kpi.warn .v { color: #c77a2b; }
+        .kpi.bad .v { color: #c0392b; }
+
+        /* 本月每日產出率長條 */
+        .trend { margin-top: 14px; border: 1px solid #ece3cf; border-radius: 10px; padding: 12px 14px 8px; background: #fffdf8; }
+        .trend .t-title { font-size: 12.5px; color: #8f8778; margin-bottom: 10px; }
+        .bars { display: flex; align-items: flex-end; gap: 3px; height: 92px; overflow-x: auto; padding-bottom: 2px; }
+        .bar-wrap { flex: 1 0 18px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; cursor: default; }
+        .bar { width: 100%; max-width: 26px; border-radius: 3px 3px 0 0; background: #b9c4a3; min-height: 2px; }
+        .bar.good { background: #7fa46b; }
+        .bar.warn { background: #d6a55f; }
+        .bar.bad { background: #c9796b; }
+        .bar.today { outline: 2px solid #55503f; outline-offset: 1px; }
+        .bar-lbl { font-size: 9.5px; color: #aaa; margin-top: 4px; }
+        .bar-val { font-size: 9.5px; color: #8f8778; margin-bottom: 2px; }
+
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px; }
+        table.data th { background: #f5f6fa; padding: 9px 8px; text-align: left; color: #555; white-space: nowrap; font-weight: 600; }
+        table.data td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        table.data input, table.data select {
+            width: 100%; padding: 6px 7px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;
+            font-family: inherit; background: #fffdf8;
+        }
+        table.data input:focus, table.data select:focus { outline: none; border-color: #7a8663; background: #fff; }
+        input.mini { width: 74px !important; text-align: right; }
+        .pct { font-weight: bold; }
+        .pct.good { color: #2e7d32; }
+        .pct.warn { color: #c77a2b; }
+        .pct.bad { color: #c0392b; }
+        .sub { font-size: 11.5px; color: #999; }
+        .del-btn { border: none; background: none; color: #c0392b; cursor: pointer; font-size: 15px; padding: 2px 6px; }
+
+        .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+        .field label { display: block; font-size: 12.5px; color: #8f8778; margin-bottom: 5px; }
+        .field input, .field textarea, .field select {
+            width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px;
+            font-family: inherit; background: #fffdf8;
+        }
+        .field textarea { min-height: 70px; resize: vertical; line-height: 1.6; }
+        .full { grid-column: 1 / -1; }
+        .empty-hint { text-align: center; color: #999; padding: 26px 10px; font-size: 14px; line-height: 1.9; }
+        .note { font-size: 12px; color: #999; padding: 14px 20px 26px; line-height: 1.8; }
+
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9998; align-items: center; justify-content: center; padding: 16px; }
+        .modal.active { display: flex; }
+        .modal-box { background: white; border-radius: 12px; max-width: 760px; width: 100%; max-height: 86vh; overflow: auto; padding: 18px 20px 22px; }
+        .modal-box h3 { font-size: 17px; color: #55503f; margin-bottom: 10px; }
+        .modal-box .hint { font-size: 12px; color: #999; margin-bottom: 12px; line-height: 1.7; }
+        .modal-box pre { background: #f7f5ee; border: 1px solid #ece3cf; border-radius: 8px; padding: 12px 14px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+        .modal-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+        .hist-row { display: flex; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid #f0f0f0; font-size: 13.5px; cursor: pointer; }
+        .hist-row:hover { background: #faf7ef; }
+        .hist-row .d { font-weight: bold; color: #55503f; width: 108px; flex: none; }
+        .hist-row .t { color: #777; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (max-width: 480px) {
+            .section { padding: 14px 12px; }
+            .toolbar { padding: 12px; }
+            .saveState { margin-left: 0; }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+    <script src="gate.js?v=20260723"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📝 生管每日記錄</h1>
+            <p>全部手動輸入，不需要先匯入任何檔案</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="quick" onclick="dmShiftDay(-1)">◀ 前一天</button>
+            <label>記錄日 <input type="date" id="dmDate" onchange="dmLoadDate()"></label>
+            <button class="quick" onclick="dmShiftDay(1)">後一天 ▶</button>
+            <button class="quick" onclick="dmSetDay(0)">今天</button>
+            <button class="quick" onclick="dmSetDay(-1)">昨天</button>
+            <button class="imp-btn" onclick="dmMakeReport()">📋 產生日報</button>
+            <button class="export-btn" onclick="dmOpenCfg()">⚙️ 產線與月計劃</button>
+            <button class="export-btn" onclick="dmHistory()">📜 歷史</button>
+            <button class="export-btn" onclick="dmExport()">⬇️ 匯出 Excel</button>
+            <span class="saveState" id="dmState">—</span>
+        </div>
+
+        <!-- ① 月累計 -->
+        <div class="section">
+            <h3>① 本月累計 <span class="auto-tag">自動加總你每天輸入的數字</span></h3>
+            <div class="hint">本月計劃量在「⚙️ 產線與月計劃」設定一次；月累計實際＝這個月每天輸入的實際產量加總。</div>
+            <div class="kpis" id="dmMonthKpi"></div>
+            <div class="trend">
+                <div class="t-title">本月每日產出率（達成率＝當日實際 ÷ 當日計劃；灰色＝沒輸入資料的日子）</div>
+                <div class="bars" id="dmTrend"></div>
+            </div>
+        </div>
+
+        <!-- ② 當日產出 -->
+        <div class="section">
+            <h3>② 各產線當日產出 <span class="fill-tag">輸入計劃與實際</span> <span class="auto-tag">達成率自動算</span></h3>
+            <div class="hint">全廠一個達成率會蓋掉某條線只有 60% 的事實，所以分線輸入。產線名稱要改或增減，去「⚙️ 產線與月計劃」。</div>
+            <div style="margin-bottom:10px;">
+                <button class="export-btn" onclick="dmCopyPrev()">📋 帶入上一個有資料日的計劃量</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data" id="dmLineTable"></table>
+            </div>
+        </div>
+
+        <!-- ③ 落後與異常 -->
+        <div class="section">
+            <h3>③ 落後與異常項目 <span class="fill-tag">最重要：原因、負責人、補回日</span></h3>
+            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。</div>
+            <div style="margin-bottom:10px;">
+                <button class="export-btn" onclick="dmAddLag()">＋ 新增一列</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data" id="dmLagTable"></table>
+            </div>
+        </div>
+
+        <!-- ④ 出貨 -->
+        <div class="section">
+            <h3>④ 出貨與交期 <span class="fill-tag">手填</span></h3>
+            <div class="hint">產出率高但客戶拿不到貨是常見狀況，這段要跟達成率並排看。</div>
+            <div class="fields">
+                <div class="field"><label>今日應出貨（筆／台）</label><input type="text" data-path="ship.due" oninput="dmEdit(this)"></div>
+                <div class="field"><label>今日實際出貨</label><input type="text" data-path="ship.done" oninput="dmEdit(this)"></div>
+                <div class="field"><label>本月累計遲交</label><input type="text" data-path="ship.late" oninput="dmEdit(this)"></div>
+                <div class="field full"><label>出貨說明（沒出成的原因、客戶反應）</label><textarea data-path="ship.note" oninput="dmEdit(this)" placeholder="例：A 客戶 3 台因烤漆重工延到 9/20 出"></textarea></div>
+            </div>
+        </div>
+
+        <!-- ⑤ 風險 -->
+        <div class="section">
+            <h3>⑤ 未來 3 天風險預告 <span class="fill-tag">手填</span></h3>
+            <div class="hint">日報的價值在預警，不在回顧。</div>
+            <div class="fields">
+                <div class="field full"><label>缺料 / 產能 / 人力風險</label><textarea data-path="risk" oninput="dmEdit(this)" placeholder="例：9/20 智三線 XX 料未到，影響 2 批共 40 台；9/21 預組區 2 人請假"></textarea></div>
+            </div>
+        </div>
+
+        <!-- ⑥ 結論 -->
+        <div class="section">
+            <h3>⑥ 今日結論 <span class="fill-tag">一句話</span></h3>
+            <div class="hint">總經理只讀這一句的機率很高。寫法：現況 → 原因 → 什麼時候補回。</div>
+            <div class="fields">
+                <div class="field full"><label>一句話總結</label><textarea data-path="summary" oninput="dmEdit(this)" placeholder="例：今日全廠達成 94%，智三線因 XX 料缺件落後 2 天，料件 9/20 到，預計 9/22 補回。"></textarea></div>
+                <div class="field"><label>填表人</label><input type="text" data-path="author" oninput="dmEdit(this)" placeholder="姓名"></div>
+            </div>
+        </div>
+
+        <div class="note">
+            <b>這一版不讀任何排程檔</b>：產線、計劃量、實際產量全部自己輸入，開了就能用。<br>
+            <b>自動儲存</b>：欄位改完 1 秒後存到雲端（toolbox/dailylog），同時存一份在本機；雲端連不上時照樣能填，只是別人看不到。<br>
+            <b>📋 產生日報</b>：整理成純文字，可複製貼進郵件，或按「開啟郵件草稿」帶進信箱（不會自動寄，你按送出才會寄）。<br>
+            <b>⬇️ 匯出 Excel</b>：三張表（日報彙總／落後明細／產線明細），月底檢討用。<br>
+            等 Frozen 排程建好之後，可改用 <a href="daily.html" style="color:#6e7a58;">🔗 連動版日報</a>，計劃與實際就不用自己打。
+        </div>
+    </div>
+
+    <!-- 設定 -->
+    <div class="modal" id="dmCfgModal" onclick="if(event.target===this) dmCloseCfg()">
+        <div class="modal-box">
+            <h3>⚙️ 產線與月計劃</h3>
+            <div class="hint">產線名稱直接改；月計劃量是<b>該月整月的目標台數</b>，每個月各存各的，換月份要重新填。</div>
+            <div style="margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <label style="font-size:13px;color:#8f8778;">月份 <input type="month" id="dmCfgMonth" onchange="dmRenderCfg()" style="padding:6px 8px;border:1px solid #ddd;border-radius:6px;"></label>
+                <label style="font-size:13px;color:#8f8778;">本月工作天數 <input type="text" id="dmCfgWd" class="mini" oninput="dmCfgWdEdit()" style="width:70px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;text-align:right;"></label>
+                <span class="sub" id="dmCfgWdHint"></span>
+            </div>
+            <div class="table-wrap">
+                <table class="data" id="dmCfgTable" style="min-width:420px;"></table>
+            </div>
+            <div class="modal-actions">
+                <button class="export-btn" onclick="dmAddLine()">＋ 新增產線</button>
+                <button class="imp-btn" onclick="dmCloseCfg()">完成</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日報文字 -->
+    <div class="modal" id="dmRepModal" onclick="if(event.target===this) this.classList.remove('active')">
+        <div class="modal-box">
+            <h3>📋 日報文字</h3>
+            <pre id="dmRepText"></pre>
+            <div class="modal-actions">
+                <button class="imp-btn" onclick="dmCopyReport()">複製全文</button>
+                <button class="export-btn" onclick="dmMailReport()">✉️ 開啟郵件草稿</button>
+                <button class="export-btn" onclick="document.getElementById('dmRepModal').classList.remove('active')">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 歷史 -->
+    <div class="modal" id="dmHistModal" onclick="if(event.target===this) this.classList.remove('active')">
+        <div class="modal-box">
+            <h3>📜 歷史記錄</h3>
+            <div id="dmHistBody"></div>
+            <div class="modal-actions">
+                <button class="export-btn" onclick="document.getElementById('dmHistModal').classList.remove('active')">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260709a"></script>
+    <script>
+        // ===== 資料（完全獨立，不讀 Frozen / 工時 / 行事曆）=====
+        // toolbox/dailylog/config          = { lines:[名稱], targets:{ 'YYYY-MM': {lineKey: 月計劃量} }, workdays:{ 'YYYY-MM': 天數 } }
+        // toolbox/dailylog/records/<日期>  = { date, lines:{lineKey:{name,plan,act,people,ot,stop,note}}, lags:[], ship:{}, risk, summary, author }
+        const CFG_NODE = 'toolbox/dailylog/config';
+        const REC_NODE = 'toolbox/dailylog/records';
+        const DEFAULT_LINES = ['智能一二走線', '智能三線（下組）', '精密機電', '預組區', '應變售服線 1', '應變售服線 2'];
+        const REASONS = ['缺料', '人力不足', '品質異常/重工', '設變', '機台故障', '客戶變更', '前製程未交', '其他'];
+        const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+        const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
+
+        let dmCfg = { lines: DEFAULT_LINES.slice(), targets: {}, workdays: {} };
+        let dmRecs = {};          // 全部日期的記錄（月累計要用）
+        let dmRec = null;         // 目前這一天
+        let dmTimer = null, dmCfgTimer = null, dmRecRef = null;
+
+        function blankRec(date) {
+            return { date, author: '', summary: '', risk: '', ship: { due: '', done: '', late: '', note: '' }, lines: {}, lags: [], updatedAt: '' };
+        }
+        const ym = d => (d || '').slice(0, 7);
+        const fmtN = n => Number(n || 0).toLocaleString('en-US');
+        const r1 = n => Math.round(n * 10) / 10;
+        const dmPct = (done, due) => due > 0 ? Math.round(done / due * 100) : null;
+        const dmCls = p => p == null ? '' : (p >= 100 ? 'good' : p >= 90 ? 'warn' : 'bad');
+        // 該月週一～五的天數（工作天數沒設定時的預設值）
+        function dmAutoWd(m) {
+            const [y, mo] = m.split('-').map(Number);
+            const last = new Date(y, mo, 0).getDate();
+            let n = 0;
+            for (let i = 1; i <= last; i++) { const w = new Date(y, mo - 1, i).getDay(); if (w >= 1 && w <= 5) n++; }
+            return n;
+        }
+        const dmWd = m => num(dmCfg.workdays && dmCfg.workdays[m]) > 0 ? num(dmCfg.workdays[m]) : dmAutoWd(m);
+        // 某天的合計（跳過整天空白的記錄）
+        function dmDayTotal(rec) {
+            let plan = 0, act = 0, any = false;
+            Object.values((rec && rec.lines) || {}).forEach(v => {
+                if (v.plan !== '' && v.plan != null) any = true;
+                if (v.act !== '' && v.act != null) any = true;
+                plan += num(v.plan); act += num(v.act);
+            });
+            return { plan, act, any, pct: dmPct(act, plan) };
+        }
+        // 本月累計（≤ base 的每一天）
+        function dmMonthStat(base) {
+            const m = ym(base);
+            let plan = 0, act = 0, days = 0;
+            Object.keys(dmRecs).forEach(d => {
+                if (ym(d) !== m || d > base) return;
+                const t = dmDayTotal(dmRecs[d]);
+                if (!t.any) return;
+                plan += t.plan; act += t.act; days++;
+            });
+            const tg = (dmCfg.targets || {})[m] || {};
+            const target = Object.values(tg).reduce((s, v) => s + num(v), 0);
+            return { plan, act, days, target, pct: dmPct(act, plan), targetPct: dmPct(act, target) };
+        }
+
+        // ===== ① 月累計 =====
+        function dmRenderMonth() {
+            const base = document.getElementById('dmDate').value;
+            if (!base) return;
+            const m = ym(base), s = dmMonthStat(base);
+            const wd = dmWd(m), rest = Math.max(wd - s.days, 0);
+            const avg = s.days > 0 ? s.act / s.days : 0;
+            const est = s.act + avg * rest;
+            const estPct = s.target > 0 ? Math.round(est / s.target * 100) : null;
+            const behind = s.plan - s.act;
+            document.getElementById('dmMonthKpi').innerHTML =
+                `<div class="kpi"><div class="k">本月計劃量（目標）</div><div class="v">${s.target > 0 ? fmtN(s.target) : '—'}</div><div class="s">${s.target > 0 ? '台・整月' : '去 ⚙️ 設定填月計劃'}</div></div>` +
+                `<div class="kpi"><div class="k">月累計實際</div><div class="v">${fmtN(Math.round(s.act))}</div><div class="s">台・已記錄 ${s.days} 天</div></div>` +
+                `<div class="kpi ${dmCls(s.targetPct)}"><div class="k">月目標完成度</div><div class="v">${s.targetPct == null ? '—' : s.targetPct + '%'}</div><div class="s">實際 ÷ 整月計劃</div></div>` +
+                `<div class="kpi ${dmCls(s.pct)}"><div class="k">進度達成率</div><div class="v">${s.pct == null ? '—' : s.pct + '%'}</div><div class="s">實際 ÷ 目前為止排定的量<br>（累計計劃 ${fmtN(Math.round(s.plan))} 台）</div></div>` +
+                `<div class="kpi ${behind > 0 ? 'bad' : 'good'}"><div class="k">${behind > 0 ? '落後' : '超前'}</div><div class="v">${fmtN(Math.abs(Math.round(behind)))}</div><div class="s">台</div></div>` +
+                `<div class="kpi ${dmCls(estPct)}"><div class="k">月底預估</div><div class="v">${fmtN(Math.round(est))}</div><div class="s">${estPct != null ? '預估達成 ' + estPct + '%　' : ''}日均 ${r1(avg)} 台<br>本月工作天 ${wd}，剩 ${rest} 天</div></div>`;
+            dmRenderTrend(base);
+        }
+        // 本月每日產出率長條
+        function dmRenderTrend(base) {
+            const m = ym(base);
+            const [y, mo] = m.split('-').map(Number);
+            const last = new Date(y, mo, 0).getDate();
+            let html = '';
+            for (let i = 1; i <= last; i++) {
+                const d = m + '-' + String(i).padStart(2, '0');
+                const t = dmDayTotal(dmRecs[d]);
+                const p = t.any ? t.pct : null;
+                const h = p == null ? 3 : Math.max(3, Math.min(p, 130) / 130 * 72);
+                const cls = p == null ? '' : (p >= 100 ? 'good' : p >= 90 ? 'warn' : 'bad');
+                const wd = new Date(d + 'T00:00:00').getDay();
+                html += `<div class="bar-wrap" title="${d}（星期${WEEK[wd]}）${t.any ? '　計劃 ' + Math.round(t.plan) + '／實際 ' + Math.round(t.act) + (p != null ? '　' + p + '%' : '') : '　無資料'}">
+                    <div class="bar-val">${p == null ? '' : p}</div>
+                    <div class="bar ${cls} ${d === base ? 'today' : ''}" style="height:${h}px;"></div>
+                    <div class="bar-lbl">${i}</div></div>`;
+            }
+            document.getElementById('dmTrend').innerHTML = html;
+        }
+
+        // ===== ② 當日產出 =====
+        function dmRenderLines() {
+            const t = document.getElementById('dmLineTable');
+            const lines = dmCfg.lines || [];
+            if (!lines.length) { t.innerHTML = '<tr><td class="empty-hint">還沒有產線，請按「⚙️ 產線與月計劃」新增。</td></tr>'; return; }
+            let html = '<tr><th>產線</th><th class="num">今日計劃(台)</th><th class="num">今日實際(台)</th><th class="num">達成率</th><th class="num">出勤人力</th><th class="num">加班(h)</th><th class="num">停線(h)</th><th style="min-width:200px;">異常說明 / 今日狀況</th></tr>';
+            lines.forEach(name => {
+                const k = san(name);
+                if (!dmRec.lines[k]) dmRec.lines[k] = { name, plan: '', act: '', people: '', ot: '', stop: '', note: '' };
+                dmRec.lines[k].name = name;
+                const v = dmRec.lines[k];
+                const p = dmPct(num(v.act), num(v.plan));
+                html += `<tr>
+                    <td style="font-weight:bold;color:#55503f;white-space:nowrap;">${esc(name)}</td>
+                    <td class="num"><input class="mini" type="text" inputmode="numeric" data-path="lines.${k}.plan" value="${esc(v.plan)}" oninput="dmEdit(this, true)"></td>
+                    <td class="num"><input class="mini" type="text" inputmode="numeric" data-path="lines.${k}.act" value="${esc(v.act)}" oninput="dmEdit(this, true)"></td>
+                    <td class="num"><span class="pct ${dmCls(p)}" data-pct="${k}">${p == null ? '—' : p + '%'}</span></td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.people" value="${esc(v.people)}" oninput="dmEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.ot" value="${esc(v.ot)}" oninput="dmEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.stop" value="${esc(v.stop)}" oninput="dmEdit(this)"></td>
+                    <td><input type="text" data-path="lines.${k}.note" value="${esc(v.note)}" oninput="dmEdit(this)" placeholder="正常可留空"></td>
+                </tr>`;
+            });
+            const tot = dmDayTotal(dmRec);
+            html += `<tr style="background:#f7f5ee;font-weight:bold;">
+                <td>全廠合計</td>
+                <td class="num" data-tot="plan">${fmtN(Math.round(tot.plan))}</td>
+                <td class="num" data-tot="act">${fmtN(Math.round(tot.act))}</td>
+                <td class="num"><span class="pct ${dmCls(tot.pct)}" data-tot="pct">${tot.pct == null ? '—' : tot.pct + '%'}</span></td>
+                <td colspan="4"></td></tr>`;
+            t.innerHTML = html;
+        }
+        // 只更新達成率與合計（不重畫輸入框，才不會把游標踢掉）
+        function dmRefreshCalc() {
+            (dmCfg.lines || []).forEach(name => {
+                const k = san(name), v = dmRec.lines[k] || {};
+                const p = dmPct(num(v.act), num(v.plan));
+                const el = document.querySelector(`[data-pct="${k}"]`);
+                if (el) { el.textContent = p == null ? '—' : p + '%'; el.className = 'pct ' + dmCls(p); }
+            });
+            const tot = dmDayTotal(dmRec);
+            const sp = document.querySelector('[data-tot="plan"]'), sa = document.querySelector('[data-tot="act"]'), spc = document.querySelector('[data-tot="pct"]');
+            if (sp) sp.textContent = fmtN(Math.round(tot.plan));
+            if (sa) sa.textContent = fmtN(Math.round(tot.act));
+            if (spc) { spc.textContent = tot.pct == null ? '—' : tot.pct + '%'; spc.className = 'pct ' + dmCls(tot.pct); }
+            dmRecs[dmRec.date] = dmRec;      // 讓月累計與長條即時反映
+            dmRenderMonth();
+        }
+        // 帶入上一個有輸入的日期的計劃量（每天計劃常常一樣，不用重打）
+        function dmCopyPrev() {
+            const base = dmRec.date;
+            const prev = Object.keys(dmRecs).filter(d => d < base && dmDayTotal(dmRecs[d]).any).sort().pop();
+            if (!prev) { alert('前面還沒有任何有資料的日期。'); return; }
+            let n = 0;
+            (dmCfg.lines || []).forEach(name => {
+                const k = san(name), src = (dmRecs[prev].lines || {})[k];
+                if (!src || src.plan === '' || src.plan == null) return;
+                dmRec.lines[k] = dmRec.lines[k] || { name, plan: '', act: '', people: '', ot: '', stop: '', note: '' };
+                dmRec.lines[k].plan = src.plan; n++;
+            });
+            dmRenderLines(); dmSave();
+            alert(`已帶入 ${prev} 的計劃量（${n} 條線）。實際產量請自己填。`);
+        }
+
+        // ===== ③ 落後與異常 =====
+        function dmRenderLags() {
+            const t = document.getElementById('dmLagTable');
+            const rows = dmRec.lags || [];
+            let html = '<tr><th style="width:34px;"></th><th>產線</th><th>批次 / 工單</th><th>料號 / 車種</th><th class="num">落後(台)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th></tr>';
+            if (!rows.length) html += '<tr><td colspan="9" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「＋ 新增一列」。</td></tr>';
+            rows.forEach((r, i) => {
+                html += `<tr>
+                    <td><button class="del-btn" onclick="dmDelLag(${i})" title="刪除這列">✕</button></td>
+                    <td><select data-path="lags.${i}.line" onchange="dmEdit(this)">
+                        <option value="">—</option>
+                        ${(dmCfg.lines || []).map(n => `<option value="${esc(n)}"${r.line === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}
+                    </select></td>
+                    <td><input type="text" data-path="lags.${i}.batch" value="${esc(r.batch || '')}" oninput="dmEdit(this)"></td>
+                    <td><input type="text" data-path="lags.${i}.part" value="${esc(r.part || '')}" oninput="dmEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="dmEdit(this)"></td>
+                    <td><select data-path="lags.${i}.reason" onchange="dmEdit(this)">
+                        <option value="">— 選原因 —</option>
+                        ${REASONS.map(x => `<option value="${x}"${r.reason === x ? ' selected' : ''}>${x}</option>`).join('')}
+                    </select></td>
+                    <td><input type="text" data-path="lags.${i}.owner" value="${esc(r.owner || '')}" oninput="dmEdit(this)"></td>
+                    <td><input type="date" data-path="lags.${i}.eta" value="${esc(r.eta || '')}" oninput="dmEdit(this)"></td>
+                    <td><input type="text" data-path="lags.${i}.action" value="${esc(r.action || '')}" oninput="dmEdit(this)" placeholder="怎麼補回來"></td>
+                </tr>`;
+            });
+            t.innerHTML = html;
+        }
+        function dmAddLag() {
+            dmRec.lags = dmRec.lags || [];
+            dmRec.lags.push({ line: '', batch: '', part: '', behind: '', reason: '', owner: '', eta: '', action: '' });
+            dmRenderLags(); dmSave();
+        }
+        function dmDelLag(i) { dmRec.lags.splice(i, 1); dmRenderLags(); dmSave(); }
+
+        // ===== 設定：產線與月計劃 =====
+        function dmOpenCfg() {
+            document.getElementById('dmCfgMonth').value = ym(document.getElementById('dmDate').value || todayStr());
+            dmRenderCfg();
+            document.getElementById('dmCfgModal').classList.add('active');
+        }
+        function dmCloseCfg() {
+            document.getElementById('dmCfgModal').classList.remove('active');
+            dmRenderLines(); dmRenderLags(); dmRenderMonth();
+        }
+        function dmRenderCfg() {
+            const m = document.getElementById('dmCfgMonth').value || ym(todayStr());
+            const tg = (dmCfg.targets || {})[m] || {};
+            document.getElementById('dmCfgWd').value = (dmCfg.workdays || {})[m] || '';
+            document.getElementById('dmCfgWdHint').textContent = `留空＝自動用週一～五算（${dmAutoWd(m)} 天）`;
+            let html = `<tr><th style="width:34px;"></th><th>產線名稱</th><th class="num">${m} 月計劃量(台)</th></tr>`;
+            (dmCfg.lines || []).forEach((name, i) => {
+                html += `<tr>
+                    <td><button class="del-btn" onclick="dmDelLine(${i})" title="刪除這條線">✕</button></td>
+                    <td><input type="text" value="${esc(name)}" onchange="dmRenameLine(${i}, this.value)"></td>
+                    <td class="num"><input class="mini" type="text" inputmode="numeric" value="${esc(tg[san(name)] ?? '')}" oninput="dmSetTarget('${esc(m)}', '${esc(san(name))}', this.value)"></td>
+                </tr>`;
+            });
+            const total = (dmCfg.lines || []).reduce((s, n) => s + num(tg[san(n)]), 0);
+            html += `<tr style="background:#f7f5ee;font-weight:bold;"><td></td><td>合計</td><td class="num">${fmtN(total)}</td></tr>`;
+            document.getElementById('dmCfgTable').innerHTML = html;
+        }
+        function dmAddLine() {
+            dmCfg.lines = dmCfg.lines || [];
+            dmCfg.lines.push('新產線 ' + (dmCfg.lines.length + 1));
+            dmSaveCfg(); dmRenderCfg();
+        }
+        function dmDelLine(i) {
+            const name = dmCfg.lines[i];
+            if (!confirm(`確定刪除產線「${name}」？\n（已經記錄過的歷史資料會留著，只是不再顯示在輸入表）`)) return;
+            dmCfg.lines.splice(i, 1);
+            dmSaveCfg(); dmRenderCfg();
+        }
+        function dmRenameLine(i, val) {
+            const v = String(val || '').trim();
+            if (!v) { dmRenderCfg(); return; }
+            const old = dmCfg.lines[i];
+            dmCfg.lines[i] = v;
+            // 月計劃跟著搬到新名字底下，不然改個名目標就不見了
+            Object.values(dmCfg.targets || {}).forEach(t => {
+                if (t[san(old)] !== undefined) { t[san(v)] = t[san(old)]; delete t[san(old)]; }
+            });
+            dmSaveCfg(); dmRenderCfg();
+        }
+        function dmSetTarget(m, key, val) {
+            dmCfg.targets = dmCfg.targets || {};
+            dmCfg.targets[m] = dmCfg.targets[m] || {};
+            if (String(val).trim() === '') delete dmCfg.targets[m][key];
+            else dmCfg.targets[m][key] = num(val);
+            clearTimeout(dmCfgTimer);
+            dmCfgTimer = setTimeout(() => { dmSaveCfg(); dmRenderCfg(); }, 700);
+        }
+        function dmCfgWdEdit() {
+            const m = document.getElementById('dmCfgMonth').value;
+            const v = document.getElementById('dmCfgWd').value;
+            dmCfg.workdays = dmCfg.workdays || {};
+            if (String(v).trim() === '') delete dmCfg.workdays[m]; else dmCfg.workdays[m] = num(v);
+            clearTimeout(dmCfgTimer);
+            dmCfgTimer = setTimeout(dmSaveCfg, 700);
+        }
+        function dmSaveCfg() {
+            try { localStorage.setItem('dm_cfg', JSON.stringify(dmCfg)); } catch (e) {}
+            if (db) db.ref(CFG_NODE).set(dmCfg).catch(e => console.log('設定儲存失敗', e));
+            dmRenderMonth();
+        }
+
+        // ===== 編輯與儲存 =====
+        function setPath(obj, path, val) {
+            const ks = path.split('.');
+            let o = obj;
+            for (let i = 0; i < ks.length - 1; i++) {
+                const k = ks[i];
+                if (o[k] == null || typeof o[k] !== 'object') o[k] = {};
+                o = o[k];
+            }
+            o[ks[ks.length - 1]] = val;
+        }
+        function dmEdit(el, recalc) {
+            setPath(dmRec, el.dataset.path, el.value);
+            if (recalc) dmRefreshCalc();
+            dmMark('dirty');
+            clearTimeout(dmTimer);
+            dmTimer = setTimeout(dmSave, 1000);
+        }
+        function dmMark(state) {
+            const el = document.getElementById('dmState');
+            el.className = 'saveState ' + (state === 'ok' ? 'ok' : state === 'dirty' ? 'dirty' : '');
+            el.textContent = state === 'ok' ? '✅ 已儲存 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
+                : state === 'dirty' ? '● 未儲存…' : '—';
+        }
+        function dmSave() {
+            clearTimeout(dmTimer);
+            if (!dmRec || !dmRec.date) return;
+            dmRec.updatedAt = new Date().toLocaleString('zh-TW');
+            dmRecs[dmRec.date] = dmRec;
+            try { localStorage.setItem('dm_rec_' + dmRec.date, JSON.stringify(dmRec)); } catch (e) {}
+            if (db) {
+                db.ref(REC_NODE + '/' + dmRec.date).set(dmRec)
+                    .then(() => dmMark('ok'))
+                    .catch(e => { console.log('雲端儲存失敗', e); dmMark('ok'); });
+            } else {
+                dmMark('ok');
+            }
+        }
+
+        // ===== 日期切換 =====
+        function dmSetDay(offset) { document.getElementById('dmDate').value = addDays(todayStr(), offset); dmLoadDate(); }
+        function dmShiftDay(n) {
+            const el = document.getElementById('dmDate');
+            el.value = addDays(el.value || todayStr(), n);
+            dmLoadDate();
+        }
+        function dmLoadDate() {
+            const date = document.getElementById('dmDate').value;
+            if (!date) return;
+            clearTimeout(dmTimer);
+            if (dmRecRef) { dmRecRef.off(); dmRecRef = null; }
+            const d = new Date(date + 'T00:00:00');
+            document.querySelector('.header p').textContent = `${date}（星期${WEEK[d.getDay()]}）　全部手動輸入，不需要先匯入任何檔案`;
+            let cached = dmRecs[date];
+            if (!cached) { try { cached = JSON.parse(localStorage.getItem('dm_rec_' + date) || 'null'); } catch (e) {} }
+            dmRec = cached && cached.date === date ? cached : blankRec(date);
+            dmRec.ship = Object.assign({ due: '', done: '', late: '', note: '' }, dmRec.ship || {});
+            dmRec.lines = dmRec.lines || {};
+            dmRec.lags = dmRec.lags || [];
+            dmRenderAll();
+            dmMark(dmRec.updatedAt ? 'ok' : '—');
+            if (db) {
+                dmRecRef = db.ref(REC_NODE + '/' + date);
+                dmRecRef.on('value', s => {
+                    const v = s.val();
+                    if (!v) return;
+                    if (document.getElementById('dmState').classList.contains('dirty')) return;   // 打字中不要被蓋掉
+                    dmRec = Object.assign(blankRec(date), v);
+                    dmRec.lines = v.lines || {};
+                    dmRec.lags = v.lags || [];
+                    dmRec.ship = Object.assign({ due: '', done: '', late: '', note: '' }, v.ship || {});
+                    dmRecs[date] = dmRec;
+                    dmRenderAll();
+                    dmMark('ok');
+                });
+            }
+        }
+        function dmRenderAll() {
+            dmRenderMonth();
+            dmRenderLines();
+            dmRenderLags();
+            document.querySelectorAll('[data-path]').forEach(el => {
+                if (el.closest('table')) return;
+                const ks = el.dataset.path.split('.');
+                let v = dmRec;
+                ks.forEach(k => { v = (v == null ? null : v[k]); });
+                el.value = v == null ? '' : v;
+            });
+        }
+
+        // ===== 日報文字 =====
+        function dmReportText() {
+            const base = dmRec.date, d = new Date(base + 'T00:00:00'), m = ym(base);
+            const s = dmMonthStat(base), tot = dmDayTotal(dmRec);
+            const wd = dmWd(m), rest = Math.max(wd - s.days, 0);
+            const avg = s.days > 0 ? s.act / s.days : 0, est = s.act + avg * rest;
+            const L = [];
+            L.push(`生管日報　${base}（星期${WEEK[d.getDay()]}）`);
+            L.push('');
+            L.push('【本月累計】' + m);
+            if (s.target > 0) L.push(`　本月計劃 ${fmtN(s.target)} 台／累計實際 ${fmtN(Math.round(s.act))} 台／目標完成度 ${s.targetPct}%`);
+            else L.push(`　累計實際 ${fmtN(Math.round(s.act))} 台（本月計劃量未設定）`);
+            L.push(`　進度達成率 ${s.pct == null ? '—' : s.pct + '%'}（累計計劃 ${fmtN(Math.round(s.plan))} 台，${s.plan - s.act > 0 ? '落後 ' + fmtN(Math.round(s.plan - s.act)) : '超前 ' + fmtN(Math.round(s.act - s.plan))} 台）`);
+            L.push(`　日均 ${r1(avg)} 台，本月工作天 ${wd} 天、已記錄 ${s.days} 天，月底預估 ${fmtN(Math.round(est))} 台${s.target > 0 ? '（' + Math.round(est / s.target * 100) + '%）' : ''}`);
+            L.push('');
+            L.push('【當日產出】');
+            (dmCfg.lines || []).forEach(name => {
+                const v = dmRec.lines[san(name)] || {};
+                if ((v.plan === '' || v.plan == null) && (v.act === '' || v.act == null) && !v.note) return;
+                const p = dmPct(num(v.act), num(v.plan));
+                const ex = [];
+                if (v.people) ex.push('人力 ' + v.people);
+                if (num(v.ot) > 0) ex.push('加班 ' + v.ot + 'h');
+                if (num(v.stop) > 0) ex.push('停線 ' + v.stop + 'h');
+                L.push(`・${name}：計劃 ${fmtN(num(v.plan))}／實際 ${fmtN(num(v.act))}（${p == null ? '—' : p + '%'}）${ex.length ? '　' + ex.join('・') : ''}${v.note ? '\n　　' + v.note : ''}`);
+            });
+            L.push(`　全廠合計：計劃 ${fmtN(Math.round(tot.plan))}／實際 ${fmtN(Math.round(tot.act))}（${tot.pct == null ? '—' : tot.pct + '%'}）`);
+            const lags = (dmRec.lags || []).filter(r => r.batch || r.part || r.action || r.reason);
+            L.push('');
+            if (lags.length) {
+                L.push('【落後與異常】');
+                lags.forEach((r, i) => {
+                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${r.behind ? '　落後 ' + r.behind + ' 台' : ''}`);
+                    const seg = [];
+                    if (r.reason) seg.push('原因：' + r.reason);
+                    if (r.owner) seg.push('負責人：' + r.owner);
+                    if (r.eta) seg.push('預計補回：' + r.eta);
+                    if (seg.length) L.push('　　' + seg.join('｜'));
+                    if (r.action) L.push('　　對策：' + r.action);
+                });
+            } else L.push('【落後與異常】無 ✅');
+            const sp = dmRec.ship || {};
+            if (sp.due || sp.done || sp.late || sp.note) {
+                L.push(''); L.push('【出貨與交期】');
+                L.push(`　應出 ${sp.due || '—'}／實出 ${sp.done || '—'}${sp.late ? '／本月累計遲交 ' + sp.late : ''}`);
+                if (sp.note) L.push('　' + sp.note);
+            }
+            if (dmRec.risk) { L.push(''); L.push('【未來 3 天風險】'); L.push('　' + String(dmRec.risk).replace(/\n/g, '\n　')); }
+            if (dmRec.summary) { L.push(''); L.push('【結論】'); L.push('　' + String(dmRec.summary).replace(/\n/g, '\n　')); }
+            L.push('');
+            L.push('填表：' + (dmRec.author || '—'));
+            return L.join('\n');
+        }
+        function dmMakeReport() {
+            dmSave();
+            document.getElementById('dmRepText').textContent = dmReportText();
+            document.getElementById('dmRepModal').classList.add('active');
+        }
+        function dmCopyReport() {
+            const txt = document.getElementById('dmRepText').textContent;
+            navigator.clipboard.writeText(txt).then(() => alert('已複製，可直接貼到郵件。')).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = txt; document.body.appendChild(ta); ta.select();
+                document.execCommand('copy'); ta.remove();
+                alert('已複製，可直接貼到郵件。');
+            });
+        }
+        function dmMailReport() {
+            // 只開草稿，不會自動寄出
+            window.location.href = 'mailto:?subject=' + encodeURIComponent('生管日報 ' + dmRec.date) +
+                '&body=' + encodeURIComponent(document.getElementById('dmRepText').textContent);
+        }
+
+        // ===== 歷史 =====
+        function dmHistory() {
+            const box = document.getElementById('dmHistBody');
+            const keys = Object.keys(dmRecs).filter(d => dmRecs[d] && (dmDayTotal(dmRecs[d]).any || dmRecs[d].summary)).sort().reverse();
+            document.getElementById('dmHistModal').classList.add('active');
+            if (!keys.length) { box.innerHTML = '<div class="empty-hint">還沒有任何記錄。</div>'; return; }
+            box.innerHTML = keys.map(k => {
+                const r = dmRecs[k], t = dmDayTotal(r);
+                const info = [];
+                if (t.pct != null) info.push('當日 ' + t.pct + '%（' + Math.round(t.act) + '/' + Math.round(t.plan) + '）');
+                if ((r.lags || []).length) info.push('落後 ' + r.lags.length + ' 項');
+                return `<div class="hist-row" onclick="dmGoDate('${k}')">
+                    <span class="d">${k}</span>
+                    <span class="t">${esc(info.join('｜'))}${r.summary ? '　' + esc(String(r.summary).slice(0, 40)) : ''}</span>
+                    <span class="sub">${esc(r.author || '')}</span></div>`;
+            }).join('');
+        }
+        function dmGoDate(d) {
+            document.getElementById('dmHistModal').classList.remove('active');
+            document.getElementById('dmDate').value = d;
+            dmLoadDate();
+        }
+
+        // ===== 匯出 Excel =====
+        function dmExport() {
+            dmSave();
+            const keys = Object.keys(dmRecs).filter(d => dmRecs[d]).sort();
+            if (!keys.length) { alert('沒有可匯出的記錄'); return; }
+            const a1 = [['日期', '星期', '當日計劃', '當日實際', '當日達成率%', '月累計計劃', '月累計實際', '月進度達成率%', '本月計劃量', '月目標完成度%', '應出貨', '實出貨', '累計遲交', '落後項數', '結論', '填表人']];
+            const a2 = [['日期', '產線', '批次/工單', '料號/車種', '落後(台)', '原因', '負責人', '預計補回日', '對策']];
+            const a3 = [['日期', '產線', '計劃(台)', '實際(台)', '達成率%', '出勤人力', '加班(h)', '停線(h)', '異常說明']];
+            keys.forEach(k => {
+                const r = dmRecs[k], t = dmDayTotal(r), ms = dmMonthStat(k), sp = r.ship || {};
+                const w = WEEK[new Date(k + 'T00:00:00').getDay()];
+                a1.push([k, w, Math.round(t.plan), Math.round(t.act), t.pct ?? '', Math.round(ms.plan), Math.round(ms.act), ms.pct ?? '',
+                         ms.target || '', ms.targetPct ?? '', sp.due || '', sp.done || '', sp.late || '', (r.lags || []).length, r.summary || '', r.author || '']);
+                (r.lags || []).forEach(g => a2.push([k, g.line || '', g.batch || '', g.part || '', g.behind || '', g.reason || '', g.owner || '', g.eta || '', g.action || '']));
+                Object.values(r.lines || {}).forEach(v => {
+                    if ((v.plan === '' || v.plan == null) && (v.act === '' || v.act == null) && !v.note) return;
+                    a3.push([k, v.name || '', num(v.plan), num(v.act), dmPct(num(v.act), num(v.plan)) ?? '', v.people || '', v.ot || '', v.stop || '', v.note || '']);
+                });
+            });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), '日報彙總');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), '落後明細');
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), '產線明細');
+            XLSX.writeFile(wb, `生管每日記錄_${todayStr()}.xlsx`);
+        }
+
+        // ===== 啟動 =====
+        (function init() {
+            try {
+                const c = JSON.parse(localStorage.getItem('dm_cfg') || 'null');
+                if (c && Array.isArray(c.lines)) dmCfg = Object.assign({ lines: [], targets: {}, workdays: {} }, c);
+            } catch (e) {}
+            // 本機快取的歷史（離線也看得到月累計）
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('dm_rec_')) {
+                        const v = JSON.parse(localStorage.getItem(k) || 'null');
+                        if (v && v.date) dmRecs[v.date] = v;
+                    }
+                }
+            } catch (e) {}
+            document.getElementById('dmDate').value = addDays(todayStr(), -1);   // 預設昨天
+            dmRec = blankRec(document.getElementById('dmDate').value);
+            if (db) {
+                db.ref(CFG_NODE).on('value', s => {
+                    const v = s.val();
+                    if (v && Array.isArray(v.lines)) {
+                        dmCfg = Object.assign({ lines: [], targets: {}, workdays: {} }, v);
+                        try { localStorage.setItem('dm_cfg', JSON.stringify(dmCfg)); } catch (e) {}
+                    } else if (!v) {
+                        dmSaveCfg();          // 雲端還沒有設定 → 把預設產線寫上去
+                    }
+                    dmRenderLines(); dmRenderLags(); dmRenderMonth();
+                });
+                db.ref(REC_NODE).limitToLast(400).on('value', s => {
+                    const v = s.val() || {};
+                    Object.keys(v).forEach(d => { if (!(document.getElementById('dmState').classList.contains('dirty') && d === (dmRec && dmRec.date))) dmRecs[d] = v[d]; });
+                    dmRenderMonth();
+                });
+            }
+            dmLoadDate();
+            window.addEventListener('beforeunload', () => { if (document.getElementById('dmState').classList.contains('dirty')) dmSave(); });
+        })();
+    </script>
+</body>
+</html>

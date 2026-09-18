@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生管每日記錄</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%);
+            min-height: 100vh; padding: 10px;
+        }
+        .container { max-width: 1100px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden; }
+        .header { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; padding: 20px; text-align: center; position: relative; }
+        .header h1 { font-size: 26px; margin-bottom: 5px; }
+        .header p { font-size: 13px; opacity: 0.9; }
+        .back-link { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: white; text-decoration: none; font-size: 14px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 16px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #eee; align-items: center; font-size: 14px; }
+        .toolbar label { display: flex; align-items: center; gap: 5px; color: #555; white-space: nowrap; }
+        .toolbar input[type=date] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+        .quick { border: 1px solid #ccc; background: white; padding: 7px 12px; border-radius: 16px; font-size: 13.5px; cursor: pointer; color: #555; }
+        .imp-btn { background: linear-gradient(135deg, #8c9a76 0%, #6e7a58 100%); color: white; border: none; padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .export-btn { border: 1px solid #ccc; background: white; padding: 8px 14px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #555; }
+        .saveState { font-size: 12.5px; color: #999; margin-left: auto; white-space: nowrap; }
+        .saveState.dirty { color: #c0392b; }
+        .saveState.ok { color: #2e7d32; }
+
+        .section { padding: 16px 20px; border-bottom: 8px solid #efe9dc; }
+        .section h3 { font-size: 16px; color: #55503f; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .section .hint { font-size: 12px; color: #999; margin-bottom: 12px; line-height: 1.6; }
+        .auto-tag { font-size: 11px; background: #eef2e6; color: #6e7a58; border-radius: 10px; padding: 2px 8px; font-weight: normal; }
+        .fill-tag { font-size: 11px; background: #fdf0e3; color: #a9713a; border-radius: 10px; padding: 2px 8px; font-weight: normal; }
+
+        .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .kpi { background: #f7f5ee; border: 1px solid #ece3cf; border-radius: 10px; padding: 12px 14px; }
+        .kpi .k { font-size: 12px; color: #8f8778; margin-bottom: 6px; }
+        .kpi .v { font-size: 22px; color: #55503f; font-weight: bold; }
+        .kpi .s { font-size: 11.5px; color: #999; margin-top: 4px; line-height: 1.5; }
+        .kpi.good .v { color: #2e7d32; }
+        .kpi.warn .v { color: #c77a2b; }
+        .kpi.bad .v { color: #c0392b; }
+
+        .table-wrap { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; }
+        table.data { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 760px; }
+        table.data th { background: #f5f6fa; padding: 9px 8px; text-align: left; color: #555; white-space: nowrap; font-weight: 600; }
+        table.data td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        table.data input, table.data select, table.data textarea {
+            width: 100%; padding: 6px 7px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;
+            font-family: inherit; background: #fffdf8;
+        }
+        table.data input:focus, table.data select:focus, table.data textarea:focus { outline: none; border-color: #7a8663; background: #fff; }
+        input.mini { width: 70px !important; }
+        .pct { font-weight: bold; }
+        .pct.good { color: #2e7d32; }
+        .pct.warn { color: #c77a2b; }
+        .pct.bad { color: #c0392b; }
+        .neg { color: #c0392b; }
+        .pos { color: #2e7d32; }
+        .sub { font-size: 11.5px; color: #999; }
+        .del-btn { border: none; background: none; color: #c0392b; cursor: pointer; font-size: 15px; padding: 2px 6px; }
+
+        .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+        .field label { display: block; font-size: 12.5px; color: #8f8778; margin-bottom: 5px; }
+        .field input, .field textarea, .field select {
+            width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px;
+            font-family: inherit; background: #fffdf8;
+        }
+        .field textarea { min-height: 70px; resize: vertical; line-height: 1.6; }
+        .full { grid-column: 1 / -1; }
+        .empty-hint { text-align: center; color: #999; padding: 26px 10px; font-size: 14px; line-height: 1.9; }
+        .note { font-size: 12px; color: #999; padding: 14px 20px 26px; line-height: 1.8; }
+
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9998; align-items: center; justify-content: center; padding: 16px; }
+        .modal.active { display: flex; }
+        .modal-box { background: white; border-radius: 12px; max-width: 760px; width: 100%; max-height: 86vh; overflow: auto; padding: 18px 20px 22px; }
+        .modal-box h3 { font-size: 17px; color: #55503f; margin-bottom: 10px; }
+        .modal-box pre { background: #f7f5ee; border: 1px solid #ece3cf; border-radius: 8px; padding: 12px 14px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+        .modal-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+        .hist-row { display: flex; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid #f0f0f0; font-size: 13.5px; cursor: pointer; }
+        .hist-row:hover { background: #faf7ef; }
+        .hist-row .d { font-weight: bold; color: #55503f; width: 108px; flex: none; }
+        .hist-row .t { color: #777; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        @media (max-width: 480px) {
+            .section { padding: 14px 12px; }
+            .toolbar { padding: 12px; }
+            .saveState { margin-left: 0; }
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="theme.css?v=20260706b">
+    <script src="gate.js?v=20260723"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="back-link" href="index.html">← 首頁</a>
+            <h1>📝 生管每日記錄</h1>
+            <p>達成率自動算，你只補原因與對策；填完一鍵產生寄給總經理的日報</p>
+        </div>
+
+        <div class="toolbar">
+            <button class="quick" onclick="drShiftDay(-1)">◀ 前一天</button>
+            <label>記錄日 <input type="date" id="drDate" onchange="drLoadDate()"></label>
+            <button class="quick" onclick="drShiftDay(1)">後一天 ▶</button>
+            <button class="quick" onclick="drSetDay(0)">今天</button>
+            <button class="quick" onclick="drSetDay(-1)">昨天</button>
+            <button class="imp-btn" onclick="drMakeReport()">📋 產生日報</button>
+            <button class="export-btn" onclick="drHistory()">📜 歷史</button>
+            <button class="export-btn" onclick="drExport()">⬇️ 匯出 Excel</button>
+            <span class="saveState" id="drState">—</span>
+        </div>
+
+        <!-- ① 月累計 -->
+        <div class="section">
+            <h3>① 本月累計 <span class="auto-tag">自動計算</span></h3>
+            <div class="hint">資料來源＝Frozen 排程（應完成）＋每日完成量（實際）。月底預估＝目前完成量＋本月平均日產出 × 剩餘工作天。</div>
+            <div class="kpis" id="drMonthKpi"></div>
+        </div>
+
+        <!-- ② 各產線當日 -->
+        <div class="section">
+            <h3>② 各產線當日產出 <span class="auto-tag">計劃／實際自動帶</span> <span class="fill-tag">人力・加班・停線・異常要填</span></h3>
+            <div class="hint">全廠一個達成率會蓋掉某條線只有 60% 的事實，所以分線列。停線時數是總經理最想看的浪費。</div>
+            <div class="table-wrap">
+                <table class="data" id="drLineTable"></table>
+            </div>
+        </div>
+
+        <!-- ③ 落後與異常 -->
+        <div class="section">
+            <h3>③ 落後與異常項目 <span class="fill-tag">最重要：原因、負責人、補回日</span></h3>
+            <div class="hint">只有數字沒有原因的日報，第三天就沒人看了。原因用固定分類，月底才統計得出「落後有幾成是缺料造成」。</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <button class="export-btn" onclick="drPullLag()">⬇️ 從 Frozen 帶入落後批次（前 8 名）</button>
+                <button class="export-btn" onclick="drAddLag()">＋ 手動新增一列</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data" id="drLagTable"></table>
+            </div>
+        </div>
+
+        <!-- ④ 出貨／交期 -->
+        <div class="section">
+            <h3>④ 出貨與交期 <span class="fill-tag">手填</span></h3>
+            <div class="hint">產出率高但客戶拿不到貨是常見狀況，這段要跟達成率並排看。</div>
+            <div class="fields">
+                <div class="field"><label>今日應出貨（筆／台）</label><input type="text" data-path="ship.due" oninput="drEdit(this)"></div>
+                <div class="field"><label>今日實際出貨</label><input type="text" data-path="ship.done" oninput="drEdit(this)"></div>
+                <div class="field"><label>本月累計遲交</label><input type="text" data-path="ship.late" oninput="drEdit(this)"></div>
+                <div class="field full"><label>出貨說明（沒出成的原因、客戶反應）</label><textarea data-path="ship.note" oninput="drEdit(this)" placeholder="例：A 客戶 3 台因烤漆重工延到 9/20 出"></textarea></div>
+            </div>
+        </div>
+
+        <!-- ⑤ 風險預告 -->
+        <div class="section">
+            <h3>⑤ 未來 3 天風險預告 <span class="fill-tag">手填</span></h3>
+            <div class="hint">日報的價值在預警，不在回顧。缺料可先到「訂單排程缺料分析」查，再把要盯的搬過來。</div>
+            <div class="fields">
+                <div class="field full"><label>缺料 / 產能 / 人力風險</label><textarea data-path="risk" oninput="drEdit(this)" placeholder="例：9/20 智三線 XX 料未到，影響 2 批共 40 台；9/21 預組區 2 人請假"></textarea></div>
+            </div>
+        </div>
+
+        <!-- ⑥ 結論 -->
+        <div class="section">
+            <h3>⑥ 今日結論 <span class="fill-tag">一句話</span></h3>
+            <div class="hint">總經理只讀這一句的機率很高。寫法：現況 → 原因 → 什麼時候補回。</div>
+            <div class="fields">
+                <div class="field full"><label>一句話總結</label><textarea data-path="summary" oninput="drEdit(this)" placeholder="例：今日全廠達成 94%，智三線因 XX 料缺件落後 2 天，料件 9/20 到，預計 9/22 補回。"></textarea></div>
+                <div class="field"><label>填表人</label><input type="text" data-path="author" oninput="drEdit(this)" placeholder="姓名"></div>
+            </div>
+        </div>
+
+        <div class="note">
+            說明：<b>記錄日預設＝昨天</b>（早上填前一天）。①②的數字全部來自 Frozen 進度追蹤，不用手打；工時達成率依各料號工時換算，「線」＝整線時間（每小時產出）、「1人」＝1 人工時（工時秒/台），兩種基準不能相加所以分開顯示。<br>
+            <b>自動儲存</b>：欄位改完 1 秒後自動存到雲端（toolbox/daily/日期），其他人打開同一天會看到同一份。<br>
+            <b>📋 產生日報</b>：把整頁整理成純文字，可複製貼到郵件，或按「開啟郵件草稿」帶進信箱（不會自動寄出，你按送出才會寄）。<br>
+            <b>⬇️ 匯出 Excel</b>：三張表（日報彙總／落後明細／產線明細），月底檢討用，可統計落後原因分布。
+        </div>
+    </div>
+
+    <!-- 日報文字 -->
+    <div class="modal" id="drRepModal" onclick="if(event.target===this) this.classList.remove('active')">
+        <div class="modal-box">
+            <h3>📋 日報文字</h3>
+            <pre id="drRepText"></pre>
+            <div class="modal-actions">
+                <button class="imp-btn" onclick="drCopyReport()">複製全文</button>
+                <button class="export-btn" onclick="drMailReport()">✉️ 開啟郵件草稿</button>
+                <button class="export-btn" onclick="document.getElementById('drRepModal').classList.remove('active')">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 歷史 -->
+    <div class="modal" id="drHistModal" onclick="if(event.target===this) this.classList.remove('active')">
+        <div class="modal-box">
+            <h3>📜 歷史記錄</h3>
+            <div id="drHistBody"></div>
+            <div class="modal-actions">
+                <button class="export-btn" onclick="document.getElementById('drHistModal').classList.remove('active')">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="common.js?v=20260709a"></script>
+    <script>
+        // ===== 資料來源 =====
+        let fzPlan = { updatedAt: '', lines: [] };   // toolbox/frozen/plan
+        let fzDone = {};                             // toolbox/frozen/done  {lineSan:{batchSan:{date:qty}}}
+        let fzWt   = {};                             // toolbox/worktime
+        let drCal  = {};                             // toolbox/calendar/hours
+        let drRec  = null;                           // 目前這一天的記錄
+        let drRecRef = null;                         // 目前綁定的雲端節點（換日期要 off）
+        let drTimer = null;                          // 自動儲存 debounce
+        const DAILY_NODE = 'toolbox/daily';
+        const san = s => String(s).replace(/[.#$\/\[\]]/g, '_');
+        const WEEK = ['日','一','二','三','四','五','六'];
+
+        const REASONS = ['缺料', '人力不足', '品質異常/重工', '設變', '機台故障', '客戶變更', '前製程未交', '其他'];
+
+        function blankRec(date) {
+            return { date, author: '', summary: '', risk: '', ship: { due: '', done: '', late: '', note: '' }, lines: {}, lags: [], snap: null, updatedAt: '' };
+        }
+
+        // ===== 工時換算 =====
+        // 優先用「料號工時彙整」當天生效值；沒設定就用 Frozen 表內建的 rate/sec
+        function drWt(row, date) {
+            const eff = wtEffective(fzWt[wtKey(row.part)], date);
+            if (eff && (num(eff.rate) > 0 || num(eff.sec) > 0)) return eff;
+            return { rate: num(row.rate), sec: num(row.sec) };
+        }
+        function drBlankHr() { return { '線': { due: 0, done: 0 }, '1人': { due: 0, done: 0 } }; }
+        // 批次鍵 → 該批的排程列（完成量只存台數，要回頭找料號才能換算工時）
+        function drLineIndex(line) {
+            const idx = {};
+            (line.rows || []).forEach(r => { const k = san(r.batch + '|' + r.part); if (!idx[k]) idx[k] = r; });
+            return idx;
+        }
+        // 單一產線在 [from, to] 的計劃／實際（台數＋工時）
+        function drRange(line, from, to) {
+            const out = { due: 0, done: 0, hr: drBlankHr() };
+            (line.rows || []).forEach(r => {
+                if (!r.date || r.date < from || r.date > to) return;
+                out.due += num(r.plan);
+                const h = wtQtyToHr(drWt(r, r.date), num(r.plan));
+                if (h.hr != null && out.hr[h.base]) out.hr[h.base].due += h.hr;
+            });
+            const idx = drLineIndex(line);
+            Object.entries(fzDone[san(line.name)] || {}).forEach(([bk, rec]) => {
+                Object.entries(rec || {}).forEach(([d, q]) => {
+                    if (d < from || d > to) return;
+                    out.done += num(q);
+                    const r = idx[bk];
+                    if (!r) return;
+                    const h = wtQtyToHr(drWt(r, d), num(q));
+                    if (h.hr != null && out.hr[h.base]) out.hr[h.base].done += h.hr;
+                });
+            });
+            return out;
+        }
+        // 全廠合計
+        function drRangeAll(from, to) {
+            const out = { due: 0, done: 0, hr: drBlankHr(), lines: [] };
+            (fzPlan.lines || []).forEach(line => {
+                const s = drRange(line, from, to);
+                out.due += s.due; out.done += s.done;
+                ['線', '1人'].forEach(b => { out.hr[b].due += s.hr[b].due; out.hr[b].done += s.hr[b].done; });
+                out.lines.push({ name: line.name, ...s });
+            });
+            return out;
+        }
+        const drPct = (done, due) => due > 0 ? Math.round(done / due * 100) : null;
+        const drCls = p => p == null ? '' : (p >= 100 ? 'good' : p >= 90 ? 'warn' : 'bad');
+        const r1 = n => Math.round(n * 10) / 10;
+        const fmtN = n => Number(n || 0).toLocaleString('en-US');
+        // 工時小字：兩種基準分開寫，沒資料就不寫
+        function drHrText(hr) {
+            const out = [];
+            ['線', '1人'].forEach(b => {
+                const h = hr[b];
+                if (!h || (h.due < 0.05 && h.done < 0.05)) return;
+                const p = drPct(h.done, h.due);
+                out.push(`${b}：${r1(h.due)}h → ${r1(h.done)}h${p != null ? '（' + p + '%）' : ''}`);
+            });
+            return out.join('　');
+        }
+        const monthFirst = d => d.slice(0, 8) + '01';
+        function monthLast(d) {
+            const dt = new Date(d + 'T00:00:00');
+            return fmtDate(new Date(dt.getFullYear(), dt.getMonth() + 1, 0));
+        }
+        // 兩日期之間的工作天數（含頭尾），依年度行事曆；行事曆沒資料時週一～五算上班
+        function drWorkdays(from, to) {
+            let n = 0, d = from, guard = 0;
+            while (d <= to && guard++ < 400) { if (dayHours(d, drCal) > 0) n++; d = addDays(d, 1); }
+            return n;
+        }
+
+        // ===== ① 月累計 =====
+        function drRenderMonth() {
+            const base = document.getElementById('drDate').value;
+            const box = document.getElementById('drMonthKpi');
+            if (!base) return;
+            if (!(fzPlan.lines || []).length) {
+                box.innerHTML = '<div class="empty-hint" style="grid-column:1/-1;">還沒有 Frozen 排程資料。<br>請先到「🧊 Frozen 進度追蹤」匯入排程並輸入每日完成量，這裡就會自動出數字。</div>';
+                return;
+            }
+            const first = monthFirst(base), last = monthLast(base);
+            const mtd = drRangeAll(first, base);       // 月初～記錄日
+            const all = drRangeAll(first, last);       // 整月計劃
+            const pct = drPct(mtd.done, mtd.due);
+            const behind = mtd.due - mtd.done;
+            // 月底預估：本月平均日產出 × 剩餘工作天
+            const pastWd = drWorkdays(first, base);
+            const restWd = base < last ? drWorkdays(addDays(base, 1), last) : 0;
+            const avg = pastWd > 0 ? mtd.done / pastWd : 0;
+            const est = mtd.done + avg * restWd;
+            const estPct = drPct(est, all.due);
+            const hrLine = drHrText(mtd.hr);
+            box.innerHTML =
+                `<div class="kpi"><div class="k">本月應完成（${first.slice(5)}～${base.slice(5)}）</div><div class="v">${fmtN(Math.round(mtd.due))}</div><div class="s">台</div></div>` +
+                `<div class="kpi"><div class="k">已完成</div><div class="v">${fmtN(Math.round(mtd.done))}</div><div class="s">台</div></div>` +
+                `<div class="kpi ${drCls(pct)}"><div class="k">月累計達成率</div><div class="v">${pct == null ? '—' : pct + '%'}</div><div class="s">${hrLine ? '工時 ' + hrLine : '（未設工時，僅台數）'}</div></div>` +
+                `<div class="kpi ${behind > 0 ? 'bad' : 'good'}"><div class="k">${behind > 0 ? '落後' : '超前'}</div><div class="v">${fmtN(Math.abs(Math.round(behind)))}</div><div class="s">台</div></div>` +
+                `<div class="kpi ${drCls(estPct)}"><div class="k">月底預估</div><div class="v">${fmtN(Math.round(est))}</div><div class="s">全月計劃 ${fmtN(Math.round(all.due))} 台${estPct != null ? '／預估達成 ' + estPct + '%' : ''}<br>剩餘 ${restWd} 個工作天・日均 ${r1(avg)} 台</div></div>`;
+        }
+
+        // ===== ② 各產線當日 =====
+        function drRenderLines() {
+            const base = document.getElementById('drDate').value;
+            const t = document.getElementById('drLineTable');
+            const lines = fzPlan.lines || [];
+            if (!lines.length) { t.innerHTML = '<tr><td class="empty-hint">尚無產線資料（需先匯入 Frozen 排程）</td></tr>'; return; }
+            let html = '<tr><th>產線</th><th class="num">計劃(台)</th><th class="num">實際(台)</th><th class="num">達成率</th><th>工時（計劃→實際）</th><th class="num">出勤人力</th><th class="num">加班(h)</th><th class="num">停線(h)</th><th style="min-width:200px;">異常說明 / 今日狀況</th></tr>';
+            lines.forEach(line => {
+                const k = san(line.name);
+                const s = drRange(line, base, base);
+                const p = drPct(s.done, s.due);
+                const v = drRec.lines[k] || {};
+                html += `<tr>
+                    <td style="font-weight:bold;color:#55503f;white-space:nowrap;">${esc(line.name)}</td>
+                    <td class="num" data-auto="due-${k}">${fmtN(Math.round(s.due))}</td>
+                    <td class="num" data-auto="done-${k}">${fmtN(Math.round(s.done))}</td>
+                    <td class="num"><span class="pct ${drCls(p)}" data-auto="pct-${k}">${p == null ? '—' : p + '%'}</span></td>
+                    <td class="sub" data-auto="hr-${k}">${drHrText(s.hr) || '—'}</td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.people" value="${esc(v.people || '')}" oninput="drEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.ot" value="${esc(v.ot || '')}" oninput="drEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lines.${k}.stop" value="${esc(v.stop || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="text" data-path="lines.${k}.note" value="${esc(v.note || '')}" oninput="drEdit(this)" placeholder="正常可留空"></td>
+                </tr>`;
+                if (!drRec.lines[k]) drRec.lines[k] = { name: line.name, people: '', ot: '', stop: '', note: '' };
+                else drRec.lines[k].name = line.name;
+            });
+            const tot = drRangeAll(base, base);
+            const tp = drPct(tot.done, tot.due);
+            html += `<tr style="background:#f7f5ee;font-weight:bold;">
+                <td>全廠合計</td><td class="num">${fmtN(Math.round(tot.due))}</td><td class="num">${fmtN(Math.round(tot.done))}</td>
+                <td class="num"><span class="pct ${drCls(tp)}">${tp == null ? '—' : tp + '%'}</span></td>
+                <td class="sub" style="font-weight:normal;">${drHrText(tot.hr) || '—'}</td><td colspan="4"></td></tr>`;
+            t.innerHTML = html;
+        }
+        // 只更新自動欄位（不動使用者正在打字的輸入框）
+        function drRefreshAuto() {
+            const base = document.getElementById('drDate').value;
+            if (!base) return;
+            drRenderMonth();
+            (fzPlan.lines || []).forEach(line => {
+                const k = san(line.name);
+                const s = drRange(line, base, base);
+                const p = drPct(s.done, s.due);
+                const set = (key, val, cls) => {
+                    const el = document.querySelector(`[data-auto="${key}-${k}"]`);
+                    if (!el) return;
+                    el.textContent = val;
+                    if (cls !== undefined) el.className = 'pct ' + cls;
+                };
+                set('due', fmtN(Math.round(s.due)));
+                set('done', fmtN(Math.round(s.done)));
+                set('pct', p == null ? '—' : p + '%', drCls(p));
+                const h = document.querySelector(`[data-auto="hr-${k}"]`);
+                if (h) h.textContent = drHrText(s.hr) || '—';
+            });
+        }
+
+        // ===== ③ 落後與異常 =====
+        function drRenderLags() {
+            const t = document.getElementById('drLagTable');
+            const rows = drRec.lags || [];
+            let html = '<tr><th style="width:34px;"></th><th>產線</th><th>批次</th><th>料號 / 車種</th><th class="num">落後(台)</th><th>原因</th><th>負責人</th><th>預計補回日</th><th style="min-width:180px;">對策</th></tr>';
+            if (!rows.length) {
+                html += '<tr><td colspan="9" class="empty-hint">今天沒有落後項目 ✅<br>有的話按上面「從 Frozen 帶入」或「手動新增一列」。</td></tr>';
+            }
+            rows.forEach((r, i) => {
+                html += `<tr>
+                    <td><button class="del-btn" onclick="drDelLag(${i})" title="刪除這列">✕</button></td>
+                    <td><input type="text" data-path="lags.${i}.line" value="${esc(r.line || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="text" data-path="lags.${i}.batch" value="${esc(r.batch || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="text" data-path="lags.${i}.part" value="${esc(r.part || '')}" oninput="drEdit(this)"></td>
+                    <td class="num"><input class="mini" type="text" data-path="lags.${i}.behind" value="${esc(r.behind || '')}" oninput="drEdit(this)"></td>
+                    <td><select data-path="lags.${i}.reason" onchange="drEdit(this)">
+                        <option value="">— 選原因 —</option>
+                        ${REASONS.map(x => `<option value="${x}"${r.reason === x ? ' selected' : ''}>${x}</option>`).join('')}
+                    </select></td>
+                    <td><input type="text" data-path="lags.${i}.owner" value="${esc(r.owner || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="date" data-path="lags.${i}.eta" value="${esc(r.eta || '')}" oninput="drEdit(this)"></td>
+                    <td><input type="text" data-path="lags.${i}.action" value="${esc(r.action || '')}" oninput="drEdit(this)" placeholder="怎麼補回來"></td>
+                </tr>`;
+            });
+            t.innerHTML = html;
+        }
+        function drAddLag() {
+            drRec.lags = drRec.lags || [];
+            drRec.lags.push({ line: '', batch: '', part: '', behind: '', reason: '', owner: '', eta: '', action: '' });
+            drRenderLags(); drSave();
+        }
+        function drDelLag(i) {
+            drRec.lags.splice(i, 1);
+            drRenderLags(); drSave();
+        }
+        // 從 Frozen 算出截至記錄日落後最多的批次：應完成(排程日≤記錄日) − 累計完成
+        function drPullLag() {
+            const base = document.getElementById('drDate').value;
+            if (!(fzPlan.lines || []).length) { alert('還沒有 Frozen 排程資料'); return; }
+            const list = [];
+            (fzPlan.lines || []).forEach(line => {
+                const idx = drLineIndex(line), agg = {};
+                (line.rows || []).forEach(r => {
+                    if (!r.date || r.date > base) return;
+                    const k = san(r.batch + '|' + r.part);
+                    if (!agg[k]) agg[k] = { row: r, due: 0, done: 0 };
+                    agg[k].due += num(r.plan);
+                });
+                Object.entries(fzDone[san(line.name)] || {}).forEach(([k, rec]) => {
+                    Object.entries(rec || {}).forEach(([d, q]) => {
+                        if (d > base) return;
+                        if (!agg[k]) { const r = idx[k]; if (!r) return; agg[k] = { row: r, due: 0, done: 0 }; }
+                        agg[k].done += num(q);
+                    });
+                });
+                Object.values(agg).forEach(a => {
+                    const behind = a.due - a.done;
+                    if (behind > 0.5) list.push({ line: line.name, row: a.row, behind: Math.round(behind) });
+                });
+            });
+            list.sort((a, b) => b.behind - a.behind);
+            const top = list.slice(0, 8);
+            if (!top.length) { alert('截至 ' + base + '，各線都沒有落後批次 ✅'); return; }
+            drRec.lags = drRec.lags || [];
+            const has = new Set(drRec.lags.map(r => (r.batch || '') + '|' + (r.part || '')));
+            let added = 0;
+            top.forEach(x => {
+                const key = x.row.batch + '|' + x.row.part;
+                if (has.has(key)) return;                       // 已經在表上就不重複帶（保留你填的原因）
+                drRec.lags.push({
+                    line: x.line, batch: x.row.batch, part: x.row.part + (x.row.desc ? '／' + x.row.desc : ''),
+                    behind: String(x.behind), reason: '', owner: '', eta: '', action: ''
+                });
+                added++;
+            });
+            drRenderLags(); drSave();
+            alert(added ? `帶入 ${added} 筆落後批次，請補「原因／負責人／預計補回日」。` : '落後批次都已經在表上了。');
+        }
+
+        // ===== 編輯與儲存 =====
+        function setPath(obj, path, val) {
+            const ks = path.split('.');
+            let o = obj;
+            for (let i = 0; i < ks.length - 1; i++) {
+                const k = ks[i];
+                if (o[k] == null || typeof o[k] !== 'object') o[k] = {};
+                o = o[k];
+            }
+            o[ks[ks.length - 1]] = val;
+        }
+        function drEdit(el) {
+            setPath(drRec, el.dataset.path, el.value);
+            drMark('dirty');
+            clearTimeout(drTimer);
+            drTimer = setTimeout(drSave, 1000);
+        }
+        function drMark(state) {
+            const el = document.getElementById('drState');
+            el.className = 'saveState ' + (state === 'ok' ? 'ok' : state === 'dirty' ? 'dirty' : '');
+            el.textContent = state === 'ok' ? '✅ 已儲存 ' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
+                : state === 'dirty' ? '● 未儲存…' : '—';
+        }
+        // 存檔時一併存下當天的自動數字（snap），之後排程被覆蓋或刪除，歷史日報仍看得到原始數字
+        function drSnapshot() {
+            const base = drRec.date;
+            if (!(fzPlan.lines || []).length) return null;
+            const first = monthFirst(base), last = monthLast(base);
+            const mtd = drRangeAll(first, base), all = drRangeAll(first, last), day = drRangeAll(base, base);
+            const pastWd = drWorkdays(first, base);
+            const restWd = base < last ? drWorkdays(addDays(base, 1), last) : 0;
+            const avg = pastWd > 0 ? mtd.done / pastWd : 0;
+            return {
+                month: { due: Math.round(mtd.due), done: Math.round(mtd.done), pct: drPct(mtd.done, mtd.due), planAll: Math.round(all.due), est: Math.round(mtd.done + avg * restWd), restWd, hr: mtd.hr },
+                day: { due: Math.round(day.due), done: Math.round(day.done), pct: drPct(day.done, day.due), hr: day.hr },
+                lines: day.lines.map(l => ({ name: l.name, due: Math.round(l.due), done: Math.round(l.done), pct: drPct(l.done, l.due) }))
+            };
+        }
+        function drSave() {
+            clearTimeout(drTimer);
+            if (!drRec || !drRec.date) return;
+            drRec.snap = drSnapshot();
+            drRec.updatedAt = new Date().toLocaleString('zh-TW');
+            try { localStorage.setItem('dr_' + drRec.date, JSON.stringify(drRec)); } catch (e) {}
+            if (db) {
+                db.ref(DAILY_NODE + '/' + drRec.date).set(drRec)
+                    .then(() => drMark('ok'))
+                    .catch(e => { console.log('雲端儲存失敗', e); alert('⚠️ 雲端儲存失敗，資料只存在本機：' + e.message); });
+            } else {
+                drMark('ok');
+            }
+        }
+
+        // ===== 日期切換與載入 =====
+        function drSetDay(offset) {
+            document.getElementById('drDate').value = addDays(todayStr(), offset);
+            drLoadDate();
+        }
+        function drShiftDay(n) {
+            const el = document.getElementById('drDate');
+            el.value = addDays(el.value || todayStr(), n);
+            drLoadDate();
+        }
+        function drLoadDate() {
+            const date = document.getElementById('drDate').value;
+            if (!date) return;
+            clearTimeout(drTimer);
+            if (drRecRef) { drRecRef.off(); drRecRef = null; }
+            const d = new Date(date + 'T00:00:00');
+            document.querySelector('.header p').textContent =
+                `${date}（星期${WEEK[d.getDay()]}）　達成率自動算，你只補原因與對策`;
+            // 先用本機快取畫出來，雲端回來再覆蓋
+            let cached = null;
+            try { cached = JSON.parse(localStorage.getItem('dr_' + date) || 'null'); } catch (e) {}
+            drRec = cached && cached.date === date ? cached : blankRec(date);
+            drRenderAll();
+            if (db) {
+                drRecRef = db.ref(DAILY_NODE + '/' + date);
+                drRecRef.on('value', s => {
+                    const v = s.val();
+                    if (!v) { drMark('—'); return; }
+                    // 別在打字時把使用者的內容蓋掉（本機有未存變更就先不吃雲端）
+                    if (document.getElementById('drState').classList.contains('dirty')) return;
+                    drRec = Object.assign(blankRec(date), v);
+                    drRec.lines = v.lines || {};
+                    drRec.lags = v.lags || [];
+                    drRec.ship = Object.assign({ due: '', done: '', late: '', note: '' }, v.ship || {});
+                    drRenderAll();
+                    drMark('ok');
+                });
+            }
+        }
+        function drRenderAll() {
+            drRenderMonth();
+            drRenderLines();
+            drRenderLags();
+            document.querySelectorAll('[data-path]').forEach(el => {
+                if (el.closest('table')) return;                    // 表格內的在各自 render 已填好
+                const ks = el.dataset.path.split('.');
+                let v = drRec;
+                ks.forEach(k => { v = (v == null ? null : v[k]); });
+                el.value = v == null ? '' : v;
+            });
+        }
+
+        // ===== 日報文字 =====
+        function drReportText() {
+            const base = drRec.date;
+            const d = new Date(base + 'T00:00:00');
+            const first = monthFirst(base), last = monthLast(base);
+            const has = (fzPlan.lines || []).length > 0;
+            const mtd = has ? drRangeAll(first, base) : null;
+            const all = has ? drRangeAll(first, last) : null;
+            const day = has ? drRangeAll(base, base) : null;
+            const L = [];
+            L.push(`生管日報　${base}（星期${WEEK[d.getDay()]}）`);
+            L.push('');
+            if (mtd) {
+                const p = drPct(mtd.done, mtd.due), behind = Math.round(mtd.due - mtd.done);
+                const pastWd = drWorkdays(first, base), restWd = base < last ? drWorkdays(addDays(base, 1), last) : 0;
+                const avg = pastWd > 0 ? mtd.done / pastWd : 0, est = mtd.done + avg * restWd;
+                L.push('【本月累計】' + first.slice(5) + '～' + base.slice(5));
+                L.push(`　應完成 ${fmtN(Math.round(mtd.due))} 台／已完成 ${fmtN(Math.round(mtd.done))} 台／達成率 ${p == null ? '—' : p + '%'}／${behind > 0 ? '落後 ' + fmtN(behind) : '超前 ' + fmtN(-behind)} 台`);
+                const hr = drHrText(mtd.hr);
+                if (hr) L.push('　工時基準　' + hr);
+                L.push(`　全月計劃 ${fmtN(Math.round(all.due))} 台，月底預估 ${fmtN(Math.round(est))} 台（${drPct(est, all.due) ?? '—'}%），剩 ${restWd} 個工作天`);
+                L.push('');
+                L.push('【當日產出】');
+                day.lines.forEach(l => {
+                    const k = san(l.name), v = drRec.lines[k] || {};
+                    if (l.due <= 0 && l.done <= 0 && !v.note) return;
+                    const p2 = drPct(l.done, l.due);
+                    const ex = [];
+                    if (v.people) ex.push('人力 ' + v.people);
+                    if (num(v.ot) > 0) ex.push('加班 ' + v.ot + 'h');
+                    if (num(v.stop) > 0) ex.push('停線 ' + v.stop + 'h');
+                    L.push(`・${l.name}：計劃 ${fmtN(Math.round(l.due))}／實際 ${fmtN(Math.round(l.done))}（${p2 == null ? '—' : p2 + '%'}）${ex.length ? '　' + ex.join('・') : ''}${v.note ? '\n　　' + v.note : ''}`);
+                });
+                const tp = drPct(day.done, day.due);
+                L.push(`　全廠合計：計劃 ${fmtN(Math.round(day.due))}／實際 ${fmtN(Math.round(day.done))}（${tp == null ? '—' : tp + '%'}）`);
+            } else {
+                L.push('【本月累計】尚無 Frozen 排程資料');
+            }
+            const lags = (drRec.lags || []).filter(r => r.batch || r.part || r.action);
+            L.push('');
+            if (lags.length) {
+                L.push('【落後與異常】');
+                lags.forEach((r, i) => {
+                    L.push(`${i + 1}. ${r.line ? '[' + r.line + '] ' : ''}${r.batch || ''}${r.part ? ' / ' + r.part : ''}${r.behind ? '　落後 ' + r.behind + ' 台' : ''}`);
+                    const seg = [];
+                    if (r.reason) seg.push('原因：' + r.reason);
+                    if (r.owner) seg.push('負責人：' + r.owner);
+                    if (r.eta) seg.push('預計補回：' + r.eta);
+                    if (seg.length) L.push('　　' + seg.join('｜'));
+                    if (r.action) L.push('　　對策：' + r.action);
+                });
+            } else {
+                L.push('【落後與異常】無 ✅');
+            }
+            const sp = drRec.ship || {};
+            if (sp.due || sp.done || sp.late || sp.note) {
+                L.push('');
+                L.push('【出貨與交期】');
+                L.push(`　應出 ${sp.due || '—'}／實出 ${sp.done || '—'}${sp.late ? '／本月累計遲交 ' + sp.late : ''}`);
+                if (sp.note) L.push('　' + sp.note);
+            }
+            if (drRec.risk) { L.push(''); L.push('【未來 3 天風險】'); L.push('　' + String(drRec.risk).replace(/\n/g, '\n　')); }
+            if (drRec.summary) { L.push(''); L.push('【結論】'); L.push('　' + String(drRec.summary).replace(/\n/g, '\n　')); }
+            L.push('');
+            L.push('填表：' + (drRec.author || '—'));
+            return L.join('\n');
+        }
+        function drMakeReport() {
+            drSave();
+            document.getElementById('drRepText').textContent = drReportText();
+            document.getElementById('drRepModal').classList.add('active');
+        }
+        function drCopyReport() {
+            const txt = document.getElementById('drRepText').textContent;
+            navigator.clipboard.writeText(txt)
+                .then(() => alert('已複製，可直接貼到郵件。'))
+                .catch(() => {
+                    const ta = document.createElement('textarea');
+                    ta.value = txt; document.body.appendChild(ta); ta.select();
+                    document.execCommand('copy'); ta.remove();
+                    alert('已複製，可直接貼到郵件。');
+                });
+        }
+        function drMailReport() {
+            const txt = document.getElementById('drRepText').textContent;
+            const subject = `生管日報 ${drRec.date}`;
+            // 只開草稿，不會自動寄出；內容太長時信箱可能截斷，那就改用「複製全文」
+            window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(txt);
+        }
+
+        // ===== 歷史 =====
+        function drHistory() {
+            const box = document.getElementById('drHistBody');
+            box.innerHTML = '<div class="empty-hint">讀取中…</div>';
+            document.getElementById('drHistModal').classList.add('active');
+            if (!db) { box.innerHTML = '<div class="empty-hint">離線模式，看不到雲端歷史。</div>'; return; }
+            db.ref(DAILY_NODE).limitToLast(90).get().then(s => {
+                const v = s.val() || {};
+                const keys = Object.keys(v).sort().reverse();
+                if (!keys.length) { box.innerHTML = '<div class="empty-hint">還沒有任何記錄。</div>'; return; }
+                box.innerHTML = keys.map(k => {
+                    const r = v[k], sn = r.snap || {};
+                    const m = sn.month || {}, dy = sn.day || {};
+                    const info = [];
+                    if (dy.pct != null) info.push('當日 ' + dy.pct + '%');
+                    if (m.pct != null) info.push('月累計 ' + m.pct + '%');
+                    if ((r.lags || []).length) info.push('落後 ' + r.lags.length + ' 項');
+                    return `<div class="hist-row" onclick="drGoDate('${k}')">
+                        <span class="d">${k}</span>
+                        <span class="t">${esc(info.join('｜'))}${r.summary ? '　' + esc(String(r.summary).slice(0, 40)) : ''}</span>
+                        <span class="sub">${esc(r.author || '')}</span></div>`;
+                }).join('');
+            }).catch(e => { box.innerHTML = '<div class="empty-hint">讀取失敗：' + esc(e.message) + '</div>'; });
+        }
+        function drGoDate(d) {
+            document.getElementById('drHistModal').classList.remove('active');
+            document.getElementById('drDate').value = d;
+            drLoadDate();
+        }
+
+        // ===== 匯出 Excel =====
+        function drExport() {
+            if (!db) { alert('離線模式，無法讀取雲端歷史'); return; }
+            drSave();
+            db.ref(DAILY_NODE).limitToLast(120).get().then(s => {
+                const v = s.val() || {};
+                const keys = Object.keys(v).sort();
+                if (!keys.length) { alert('沒有可匯出的記錄'); return; }
+                const a1 = [['日期', '月應完成', '月已完成', '月達成率%', '全月計劃', '月底預估', '當日計劃', '當日實際', '當日達成率%', '應出貨', '實出貨', '累計遲交', '落後項數', '結論', '填表人', '更新時間']];
+                const a2 = [['日期', '產線', '批次', '料號/車種', '落後(台)', '原因', '負責人', '預計補回日', '對策']];
+                const a3 = [['日期', '產線', '計劃(台)', '實際(台)', '達成率%', '出勤人力', '加班(h)', '停線(h)', '異常說明']];
+                keys.forEach(k => {
+                    const r = v[k], sn = r.snap || {}, m = sn.month || {}, dy = sn.day || {}, sp = r.ship || {};
+                    a1.push([k, m.due ?? '', m.done ?? '', m.pct ?? '', m.planAll ?? '', m.est ?? '', dy.due ?? '', dy.done ?? '', dy.pct ?? '',
+                             sp.due || '', sp.done || '', sp.late || '', (r.lags || []).length, r.summary || '', r.author || '', r.updatedAt || '']);
+                    (r.lags || []).forEach(g => a2.push([k, g.line || '', g.batch || '', g.part || '', g.behind || '', g.reason || '', g.owner || '', g.eta || '', g.action || '']));
+                    (sn.lines || []).forEach(l => {
+                        const f = (r.lines || {})[san(l.name)] || {};
+                        a3.push([k, l.name, l.due, l.done, l.pct ?? '', f.people || '', f.ot || '', f.stop || '', f.note || '']);
+                    });
+                });
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), '日報彙總');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), '落後明細');
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), '產線明細');
+                XLSX.writeFile(wb, `生管每日記錄_${todayStr()}.xlsx`);
+            }).catch(e => alert('匯出失敗：' + e.message));
+        }
+
+        // ===== 啟動 =====
+        (function init() {
+            document.getElementById('drDate').value = addDays(todayStr(), -1);   // 預設昨天
+            drRec = blankRec(document.getElementById('drDate').value);
+            if (db) {
+                db.ref('toolbox/frozen/plan').on('value', s => {
+                    const v = s.val();
+                    if (v && Array.isArray(v.lines)) fzPlan = v;
+                    drRenderLines(); drRenderMonth();
+                });
+                db.ref('toolbox/frozen/done').on('value', s => { fzDone = s.val() || {}; drRefreshAuto(); });
+                db.ref(WT_NODE).on('value', s => { fzWt = s.val() || {}; drRefreshAuto(); });
+                db.ref('toolbox/calendar/hours').on('value', s => { drCal = s.val() || {}; drRenderMonth(); });
+            }
+            drLoadDate();
+            window.addEventListener('beforeunload', () => { if (document.getElementById('drState').classList.contains('dirty')) drSave(); });
+        })();
+    </script>
+</body>
+</html>
