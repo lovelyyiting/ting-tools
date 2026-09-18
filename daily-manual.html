@@ -274,6 +274,7 @@
         let dmRecs = {};          // 全部日期的記錄（月累計要用）
         let dmRec = null;         // 目前這一天
         let dmTimer = null, dmCfgTimer = null, dmRecRef = null;
+        let dmOrphanKeys = [];        // ②表格最下面「已移除產線」殘留資料的 key，供刪除用
 
         function blankRec(date) {
             return { date, author: '', summary: '', risk: '', ship: { due: '', done: '', late: '', note: '' }, lines: {}, lags: [], updatedAt: '' };
@@ -380,6 +381,24 @@
                     <td><input type="text" data-path="lines.${k}.note" value="${esc(v.note)}" oninput="dmEdit(this)" placeholder="正常可留空"></td>
                 </tr>`;
             });
+            // 孤兒列：產線改名或刪掉後，舊資料還留在這天的記錄裡。不顯示出來就會變成
+            // 「合計看得到數字、表上找不到列、也刪不掉」，所以一律列出來讓人處理。
+            const known = new Set(lines.map(san));
+            dmOrphanKeys = Object.entries(dmRec.lines || {}).filter(([k, v]) =>
+                !known.has(k) && (String(v.plan ?? '') !== '' || String(v.act ?? '') !== '' || v.note || v.people || v.ot || v.stop)).map(([k]) => k);
+            dmOrphanKeys.forEach((k, oi) => {
+                const v = dmRec.lines[k] || {};
+                const p = dmPct(num(v.act), num(v.plan));
+                html += `<tr style="background:#fdf3f1;">
+                    <td style="white-space:nowrap;"><span style="color:#c0392b;">⚠️ ${esc(v.name || k)}</span><br><span class="sub">已移除的產線</span></td>
+                    <td class="num">${esc(v.plan ?? '')}</td>
+                    <td class="num">${esc(v.act ?? '')}</td>
+                    <td class="num"><span class="pct ${dmCls(p)}">${p == null ? '—' : p + '%'}</span></td>
+                    <td class="num">${esc(v.people ?? '')}</td><td class="num">${esc(v.ot ?? '')}</td><td class="num">${esc(v.stop ?? '')}</td>
+                    <td>${esc(v.note ?? '')}
+                        <button class="del-btn" onclick="dmDropLine(${oi})" title="刪掉這筆舊資料">✕ 刪除這筆</button></td>
+                </tr>`;
+            });
             const tot = dmDayTotal(dmRec);
             html += `<tr style="background:#f7f5ee;font-weight:bold;">
                 <td>全廠合計</td>
@@ -404,6 +423,15 @@
             if (spc) { spc.textContent = tot.pct == null ? '—' : tot.pct + '%'; spc.className = 'pct ' + dmCls(tot.pct); }
             dmRecs[dmRec.date] = dmRec;      // 讓月累計與長條即時反映
             dmRenderMonth();
+        }
+        // 刪掉某天記錄裡「已移除產線」的殘留資料
+        function dmDropLine(oi) {
+            const key = dmOrphanKeys[oi];
+            if (!key) return;
+            const v = (dmRec.lines || {})[key] || {};
+            if (!confirm(`確定刪掉 ${dmRec.date} 這筆舊資料？\n\n${v.name || key}：計劃 ${v.plan || '—'}／實際 ${v.act || '—'}\n（刪掉後合計與月累計就不會再算它）`)) return;
+            delete dmRec.lines[key];
+            dmRenderLines(); dmSave();
         }
         // 帶入上一個有輸入的日期的計劃量（每天計劃常常一樣，不用重打）
         function dmCopyPrev() {
@@ -547,7 +575,7 @@
         }
         function dmDelLine(i) {
             const name = dmCfg.lines[i];
-            if (!confirm(`確定刪除產線「${name}」？\n（已經記錄過的歷史資料會留著，只是不再顯示在輸入表）`)) return;
+            if (!confirm(`確定刪除產線「${name}」？\n\n已經記錄過的歷史資料會留著，在②的表格最下面以「⚠️ 已移除的產線」顯示，可以在那裡逐筆刪掉。`)) return;
             dmCfg.lines.splice(i, 1);
             dmSaveCfg(); dmRenderCfg();
         }
@@ -555,12 +583,35 @@
             const v = String(val || '').trim();
             if (!v) { dmRenderCfg(); return; }
             const old = dmCfg.lines[i];
+            if (old === v) return;
             dmCfg.lines[i] = v;
             // 月計劃跟著搬到新名字底下，不然改個名目標就不見了
             Object.values(dmCfg.targets || {}).forEach(t => {
                 if (t[san(old)] !== undefined) { t[san(v)] = t[san(old)]; delete t[san(old)]; }
             });
+            dmMoveLineData(san(old), san(v), v);
             dmSaveCfg(); dmRenderCfg();
+        }
+        // 改名時把各天記錄裡的資料從舊 key 搬到新 key；不搬的話舊資料會變成
+        // 「合計算得到、表上看不到」的孤兒（新名字已經有資料就不覆蓋，留著讓人自己處理）
+        function dmMoveLineData(oldKey, newKey, newName) {
+            if (oldKey === newKey) return;
+            const hasVal = x => x && (String(x.plan ?? '') !== '' || String(x.act ?? '') !== '' || x.note || x.people || x.ot || x.stop);
+            const all = Object.assign({}, dmRecs);
+            if (dmRec && dmRec.date) all[dmRec.date] = dmRec;
+            let moved = 0;
+            Object.values(all).forEach(rec => {
+                if (!rec || !rec.lines || !rec.lines[oldKey]) return;
+                if (hasVal(rec.lines[newKey])) return;              // 新名字那格已經有資料 → 不覆蓋
+                rec.lines[newKey] = Object.assign({}, rec.lines[oldKey], { name: newName });
+                delete rec.lines[oldKey];
+                rec.updatedAt = new Date().toLocaleString('zh-TW');
+                dmRecs[rec.date] = rec;
+                try { localStorage.setItem('dm_rec_' + rec.date, JSON.stringify(rec)); } catch (e) {}
+                if (db) db.ref(REC_NODE + '/' + rec.date).set(rec).catch(e => console.log('搬移失敗', rec.date, e));
+                moved++;
+            });
+            if (moved) console.log(`產線改名：${oldKey} → ${newKey}，搬移 ${moved} 天的記錄`);
         }
         function dmSetTarget(m, key, val) {
             dmCfg.targets = dmCfg.targets || {};
